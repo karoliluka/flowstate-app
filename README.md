@@ -6,6 +6,14 @@ Start a focus session and every app except the ones you allow is blocked. Focus,
 
 flowstate runs completely on your phone. No account, no servers, no tracking.
 
+## Why flowstate
+
+Today everything is fighting for your attention. flowstate is for people who still value theirs.
+
+As a student, I kept losing study sessions to social media. The only thing that worked was leaving my phone in another room. Then school went digital. Assignments, schedules, and class chats all lived on my phone, so it stayed within reach, and so did the distractions. My productive sessions slowly became unproductive ones.
+
+So I built flowstate: a simple app that helps you stay focused and actually get work done, even with your phone right next to you. It blocks the apps that distract you and keeps the ones you actually need. Whether it's for work, personal growth, or just time away from your feed, flowstate protects your focus.
+
 ## How it works
 
 ### Focus sessions

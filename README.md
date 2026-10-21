@@ -1,14 +1,8 @@
 # flowstate
 
-**A focus app that makes you earn your scrolling.**
-
-Start a focus session and every app except the ones you allow is blocked. Focus, and you earn time for your distracting apps. Spend it when you want to scroll; when it's gone, they stay blocked until you've focused again.
-
-flowstate runs completely on your phone. No account, no servers, no tracking.
+**Today everything is fighting for your attention. flowstate is for people who still value theirs.**
 
 ## Why flowstate
-
-Today everything is fighting for your attention. flowstate is for people who still value theirs.
 
 As a student, I kept losing study sessions to social media. The only thing that worked was leaving my phone in another room. Then school went digital. Assignments, schedules, and class chats all lived on my phone, so it stayed within reach, and so did the distractions. My productive sessions slowly became unproductive ones.
 
@@ -24,7 +18,6 @@ Pick a subject (Math, Reading, a side project…) and tap **Start focus**. Until
 
 Ending a session takes a deliberate 1.5-second hold, so quitting on impulse is harder.
 
-
 ### Earning scrolling time
 Every focus session earns minutes for your distracting apps (the ones you pick in **Earned time**, like Instagram or TikTok). Outside of an unlock, they stay blocked.
 
@@ -39,9 +32,7 @@ Every focus session earns minutes for your distracting apps (the ones you pick i
 **Saving up has a limit.** Your balance stops growing at the mode's maximum, so you can't stockpile a whole day of scrolling. It doesn't reset at night: what you saved is still there tomorrow.
 
 ### Spending it
-Unlock your distracting apps for 15, 30 or 60 minutes. The more you've scrolled today, the more each minute costs:
-
-It's about how much you've already unlocked today, not the time of day:
+Unlock your distracting apps for 15, 30 or 60 minutes. The more you've already unlocked today, the more each minute costs (it's about how much you've scrolled, not the time of day):
 
 | Scrolling unlocked today | Cost per minute | 15 minutes costs |
 |---|---|---|
@@ -90,7 +81,7 @@ There are two schemes:
 | `Flowstate Preview` | free | off |
 | `Flowstate` | paid Developer Program | on |
 
-App blocking (Screen Time) needs a paid account and never works in the simulator. The Preview build leaves it out so the rest of the app runs with a free account. Both builds share the same data on the phone.
+App blocking (Screen Time) needs a paid account on a real iPhone. The Preview build leaves it out so the rest of the app runs with a free account. Both builds share the same data on the phone.
 
 1. Enable Developer Mode on the iPhone (Settings → Privacy & Security → Developer Mode), connect it, and unlock it.
 2. In SweetPad pick the scheme and your iPhone, then run. Or from the terminal:
@@ -109,7 +100,7 @@ For the full build: put the paid team's ID in `DEVELOPMENT_TEAM` in `project.yml
 xcodebuild test -scheme Flowstate -only-testing:FlowstateTests \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 
-# Real Screen Time flow in the simulator (~2.5 min, grants Screen Time access on that simulator)
+# Real Screen Time flow in the simulator (uses Screen Time access on that simulator)
 xcodebuild test -scheme Flowstate -only-testing:FlowstateUITests \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
@@ -133,7 +124,7 @@ Flowstate/
   App/        app entry point
   Models/     Subject, FocusSession (SwiftData)
   Services/   BlockingManager, SessionManager, EarnedTimeManager
-  Views/      Focus, Subjects, Stats, Earned, Profile
+  Views/      Focus, Subjects, Stats, Earned, Profile, intro animation
   Utilities/  formatting, colors, comparisons, sample data
 Shared/            Screen Time code used by the app and the extension
 FlowstateMonitor/  extension that re-blocks apps in the background

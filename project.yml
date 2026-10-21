@@ -1,0 +1,133 @@
+name: Flowstate
+options:
+  bundleIdPrefix: com.lukakaroli
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+# Preview is a debug build without the Screen Time capability, so it can be
+# signed with a free Apple account. App blocking is turned off in it.
+configs:
+  Debug: debug
+  Release: release
+  Preview: debug
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Set this to your Apple Developer Team ID to run on a real iPhone.
+    DEVELOPMENT_TEAM: A4VFZ639DV
+
+targets:
+  Flowstate:
+    type: application
+    platform: iOS
+    sources: [Flowstate, Shared]
+    dependencies:
+      - target: FlowstateMonitor
+    info:
+      path: Flowstate/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: flowstate
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Flowstate/Resources/Flowstate.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      configs:
+        Preview:
+          CODE_SIGN_ENTITLEMENTS: ""
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+
+  # Runs in the background to re-block apps when earned time or a Pomodoro break ends.
+  FlowstateMonitor:
+    type: app-extension
+    platform: iOS
+    sources: [FlowstateMonitor, Shared]
+    info:
+      path: FlowstateMonitor/Info.plist
+      properties:
+        CFBundleDisplayName: flowstate monitor
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FlowstateMonitor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate.monitor
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: FlowstateMonitor/FlowstateMonitor.entitlements
+      configs:
+        Preview:
+          CODE_SIGN_ENTITLEMENTS: ""
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+
+  FlowstateTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [FlowstateTests]
+    dependencies:
+      - target: Flowstate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # Drives the real Screen Time flow in the simulator; see FlowstateUITests/BlockingUITests.swift.
+  FlowstateUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [FlowstateUITests]
+    dependencies:
+      - target: Flowstate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate.uitests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  # Full app with Screen Time blocking (needs a paid developer account on a real iPhone).
+  Flowstate:
+    build:
+      targets:
+        Flowstate: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [FlowstateTests, FlowstateUITests]
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  # Runs on a free Apple account; everything except app blocking.
+  Flowstate Preview:
+    build:
+      targets:
+        Flowstate: all
+    run:
+      config: Preview
+    test:
+      config: Preview
+    profile:
+      config: Preview
+    analyze:
+      config: Preview
+    archive:
+      config: Preview

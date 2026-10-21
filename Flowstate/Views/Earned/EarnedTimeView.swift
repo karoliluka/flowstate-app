@@ -438,7 +438,7 @@ private struct PriceCard: View {
             }
             .padding(.top, 4)
 
-            Text("Each minute of scrolling you unlock is paid with earned time. Your first 30 minutes of the day cost 1 minute each, the next 30 cost 1.5, and after an hour every minute costs 2. So 15 minutes costs 15m at first, but 30m late in the day. It resets at midnight.")
+            Text("Each minute of scrolling you unlock is paid with earned time. Your first 30 minutes of the day cost 1 minute each, the next 30 cost 1.5, and after an hour every minute costs 2. So unlocking 15 minutes costs 15m at first, but 30m once you've already scrolled an hour today. The count starts over at midnight.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

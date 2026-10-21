@@ -16,7 +16,6 @@ Pick a subject (Math, Reading, a side project…) and tap **Start focus**. Until
 
 Ending a session takes a deliberate 1.5-second hold, so quitting on impulse is harder.
 
-Choose **Stopwatch** to focus for as long as you like, or **Pomodoro** for focus and break rounds (25/5, 50/10, 90/15 or your own). During Pomodoro breaks your apps open up, and they lock again when the next round starts. Only focus time counts.
 
 ### Earning scrolling time
 Every focus session earns minutes for your distracting apps (the ones you pick in **Earned time**, like Instagram or TikTok). Outside of an unlock, they stay blocked.
@@ -34,6 +33,8 @@ Every focus session earns minutes for your distracting apps (the ones you pick i
 ### Spending it
 Unlock your distracting apps for 15, 30 or 60 minutes. The more you've scrolled today, the more each minute costs:
 
+It's about how much you've already unlocked today, not the time of day:
+
 | Scrolling unlocked today | Cost per minute | 15 minutes costs |
 |---|---|---|
 | first 30 min | 1 min of earned time | 15 min |
@@ -42,14 +43,14 @@ Unlock your distracting apps for 15, 30 or 60 minutes. The more you've scrolled 
 
 The price resets at midnight. Finished early? **Lock now** gives back the time you didn't use.
 
-Out of time but really need an app? You get **3 emergency passes a day**, 5 minutes each, free.
+Out of time but really need an app? You get **3 emergency passes a day**, 5 minutes each, free. Tap **earned** on the home screen and then **Use an emergency pass (5 min)**. The button shows up once you've chosen your distracting apps.
 
 ### No quick escapes
 - Making things stricter works instantly. Making them easier (an easier mode, or removing a distracting app) takes **10 minutes**, and you can cancel in the meantime.
 - While a session or an unlock is running, the phone's date and time can't be changed, so the clock can't be wound to stretch it.
 
 ### Stats
-Time focused today, this week, month and year, by subject, with a streak, a calendar of every day, weekly goals per subject, and comparisons like "that's 2.6 Harry Potter movie marathons". Milestones go from your first hour up to 10,000 hours.
+Time focused today, this week, month and year, with a streak, a calendar of every day, and comparisons like "that's 2.6 Harry Potter movie marathons". Each subject has its own page with a weekly goal, its history and a chart. Milestones go from your first hour up to 10,000 hours.
 
 ## Privacy
 Everything stays on your phone. Apple's Screen Time keeps app choices private: flowstate never learns which apps you pick, only opaque tokens for blocking them.
@@ -96,7 +97,7 @@ For the full build: put the paid team's ID in `DEVELOPMENT_TEAM` in `project.yml
 
 ## Tests
 ```sh
-# Logic: schedule windows, Pomodoro phases, unlock pricing, formatting
+# Logic: schedule windows, unlock pricing, formatting
 xcodebuild test -scheme Flowstate -only-testing:FlowstateTests \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 
@@ -114,7 +115,6 @@ The simulator covers the basics. These need the full build on a phone:
 - [ ] Phone and incoming calls work during a session.
 - [ ] Allowed apps, including whole allowed categories, stay open during a session.
 - [ ] An earned-time unlock and a 5-minute emergency pass end on time with flowstate closed.
-- [ ] Pomodoro breaks unlock and re-lock on time with flowstate closed.
 - [ ] Date & Time can't be changed during a session or unlock.
 - [ ] Turning off flowstate's Screen Time access in Settings removes all blocks, and the app notices.
 - [ ] Blocks survive restarting the phone.
@@ -123,8 +123,8 @@ The simulator covers the basics. These need the full build on a phone:
 ```
 Flowstate/
   App/        app entry point
-  Models/     Subject, FocusSession (SwiftData), PomodoroConfig
-  Services/   BlockingManager, SessionManager, EarnedTimeManager, notifications
+  Models/     Subject, FocusSession (SwiftData)
+  Services/   BlockingManager, SessionManager, EarnedTimeManager
   Views/      Focus, Subjects, Stats, Earned, Profile
   Utilities/  formatting, colors, comparisons, sample data
 Shared/            Screen Time code used by the app and the extension

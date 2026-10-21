@@ -33,7 +33,9 @@ targets:
         CFBundleDisplayName: flowstate
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        # Same dark background as the intro, so launching doesn't flash white first.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -50,7 +52,7 @@ targets:
           CODE_SIGN_ENTITLEMENTS: ""
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
 
-  # Runs in the background to re-block apps when earned time or a Pomodoro break ends.
+  # Runs in the background to re-block distracting apps when earned time runs out.
   FlowstateMonitor:
     type: app-extension
     platform: iOS

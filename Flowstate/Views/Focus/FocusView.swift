@@ -14,15 +14,7 @@ struct FocusView: View {
     @State private var showingProfile = false
     @State private var showingNewSubject = false
     @State private var showingEarned = false
-    @State private var showingPomodoro = false
 
-    @AppStorage(StorageKeys.pomodoroEnabled) private var pomodoroEnabled = false
-    @AppStorage(StorageKeys.pomodoroFocus) private var pomodoroFocus = 25
-    @AppStorage(StorageKeys.pomodoroBreak) private var pomodoroBreak = 5
-
-    private var pomodoro: PomodoroConfig {
-        PomodoroConfig(focusMinutes: pomodoroFocus, breakMinutes: pomodoroBreak)
-    }
 
     /// `today` comes from RootView and changes at midnight, which rebuilds the query.
     init(today: Date) {
@@ -69,35 +61,8 @@ struct FocusView: View {
                     onAdd: { showingNewSubject = true }
                 )
 
-                VStack(spacing: 10) {
-                    Picker("Mode", selection: $pomodoroEnabled) {
-                        Text("Stopwatch").tag(false)
-                        Text("Pomodoro").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
-
-                    if pomodoroEnabled {
-                        Button { showingPomodoro = true } label: {
-                            HStack(spacing: 4) {
-                                Text(pomodoro.summary)
-                                Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-                            }
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-                .animation(.snappy, value: pomodoroEnabled)
-                // Ask for notifications here, not over the session screen when it starts.
-                .task(id: pomodoroEnabled) {
-                    if pomodoroEnabled { PomodoroNotifications.requestPermission() }
-                }
-
                 Button {
-                    session.start(subject: selectedSubject, pomodoro: pomodoroEnabled ? pomodoro : nil)
+                    session.start(subject: selectedSubject)
                 } label: {
                     Text("Start focus")
                 }
@@ -131,21 +96,17 @@ struct FocusView: View {
             .navigationBarTitleDisplayMode(.inline)
             #if DEBUG
             .onAppear {
-                // Launch with `-debugSheet earned|profile|pomodoro|allowed` to open a sheet directly.
+                // Launch with `-debugSheet earned|profile|allowed` to open a sheet directly.
                 switch UserDefaults.standard.string(forKey: "debugSheet") {
                 case "allowed": showingAllowedApps = true
                 case "earned": showingEarned = true
                 case "profile": showingProfile = true
-                case "pomodoro": showingPomodoro = true
                 default: break
                 }
             }
             #endif
             .sheet(isPresented: $showingAllowedApps) {
                 AllowedAppsView()
-            }
-            .sheet(isPresented: $showingPomodoro) {
-                PomodoroSettingsView(focusMinutes: $pomodoroFocus, breakMinutes: $pomodoroBreak)
             }
             .sheet(isPresented: $showingEarned) {
                 EarnedTimeView()

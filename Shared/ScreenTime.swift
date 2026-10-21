@@ -74,7 +74,6 @@ extension ManagedSettingsStore.Name {
 
 extension DeviceActivityName {
     private static let unlockBase = "flowstate.unlock"
-    private static let pomodoroPrefix = "flowstate.pomodoro."
     private static let shortSuffix = ".short"
 
     /// Blocks distracting apps again when an unlock or emergency pass ends.
@@ -84,26 +83,7 @@ extension DeviceActivityName {
 
     static let allUnlocks: [Self] = [unlock(short: false), unlock(short: true)]
 
-    /// Lifts the focus block when break `round` starts and restores it when the break ends.
-    static func pomodoroBreak(_ round: Int, short: Bool) -> Self {
-        Self("\(pomodoroPrefix)break.\(round)" + (short ? shortSuffix : ""))
-    }
-
-    /// Only restores the focus block, for a break that's already running.
-    static func pomodoroRelock(_ round: Int, short: Bool) -> Self {
-        Self("\(pomodoroPrefix)relock.\(round)" + (short ? shortSuffix : ""))
-    }
-
     var isUnlock: Bool { rawValue.hasPrefix(Self.unlockBase) }
-    var isPomodoro: Bool { rawValue.hasPrefix(Self.pomodoroPrefix) }
-    var isPomodoroBreak: Bool { rawValue.hasPrefix(Self.pomodoroPrefix + "break.") }
-
-    /// The Pomodoro round (0-based) this activity belongs to.
-    var pomodoroRound: Int? {
-        guard isPomodoro else { return nil }
-        let parts = rawValue.dropFirst(Self.pomodoroPrefix.count).split(separator: ".")
-        return parts.count >= 2 ? Int(parts[1]) : nil
-    }
 
     /// Short windows are stretched to the 15-minute minimum and really end at the warning.
     var endsAtWarning: Bool { rawValue.hasSuffix(Self.shortSuffix) }
@@ -140,7 +120,7 @@ extension DeviceActivityCenter {
 }
 
 /// The focus-session block: everything except the apps the user allowed.
-/// While it's on, the clock is locked so a session or break can't be stretched.
+/// While it's on, the clock is locked so a session can't be stretched.
 enum FocusShield {
     static func apply() {
         guard ScreenTime.isAvailable else { return }
@@ -149,14 +129,6 @@ enum FocusShield {
         store.shield.applicationCategories = .all(except: allowed.applicationTokens.limited())
         store.shield.webDomainCategories = .all(except: allowed.webDomainTokens.limited())
         store.dateAndTime.requireAutomaticDateAndTime = true
-    }
-
-    /// Opens apps for a Pomodoro break; the clock stays locked until the session ends.
-    static func liftForBreak() {
-        guard ScreenTime.isAvailable else { return }
-        let store = ManagedSettingsStore(named: .focus)
-        store.shield.applicationCategories = nil
-        store.shield.webDomainCategories = nil
     }
 
     static func remove() {

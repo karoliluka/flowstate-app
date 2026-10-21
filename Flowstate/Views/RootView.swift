@@ -36,7 +36,6 @@ struct RootView: View {
                 // Screen Time access may have been turned off in Settings meanwhile.
                 blocking.refreshAuthorization()
                 earned.refresh()
-                session.appBecameActive()
                 today = Calendar.current.startOfDay(for: .now)
             }
         }
@@ -44,10 +43,9 @@ struct RootView: View {
             today = Calendar.current.startOfDay(for: .now)
         }
         .task {
-            // Re-block as soon as an unlock runs out, and follow Pomodoro phases, while the app is open.
+            // Re-block as soon as an unlock runs out while the app is open.
             while !Task.isCancelled {
                 earned.refresh()
-                session.refresh()
                 try? await Task.sleep(for: .seconds(1))
             }
         }

@@ -9,7 +9,7 @@ import FamilyControls
 @Observable
 final class BlockingManager {
     /// Apps (and websites) that stay usable during a focus session. Stored in the
-    /// App Group so the extension can re-apply the block after a Pomodoro break.
+    /// App Group, next to the distracting apps the extension reads.
     var allowed: FamilyActivitySelection {
         didSet { SharedSettings.saveAllowed(allowed) }
     }
@@ -44,11 +44,6 @@ final class BlockingManager {
     func startBlocking() {
         guard isAuthorized else { return }
         FocusShield.apply()
-    }
-
-    /// Opens apps for a Pomodoro break; the session's clock lock stays on.
-    func liftForBreak() {
-        FocusShield.liftForBreak()
     }
 
     func stopBlocking() {

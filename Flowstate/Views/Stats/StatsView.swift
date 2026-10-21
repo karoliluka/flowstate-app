@@ -44,7 +44,6 @@ struct StatsView: View {
                         if !FocusComparisons.matches(for: stats.total).isEmpty {
                             section("That's like") { ComparisonCards(total: stats.total) }
                         }
-                        section("By subject") { breakdown(stats) }
                     }
                 }
                 .padding()
@@ -101,30 +100,6 @@ struct StatsView: View {
         return (0..<5)
             .compactMap { calendar.date(byAdding: .day, value: -4 - 7 * $0, to: stats.end) }
             .filter { $0 >= stats.start }
-    }
-
-    private func breakdown(_ stats: Stats) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(stats.subjects) { subject in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Circle().fill(subject.color).frame(width: 8, height: 8)
-                        Text(subject.name)
-                        Spacer()
-                        Text(subject.duration.focusFormatted)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.subheadline)
-                    GeometryReader { geometry in
-                        Capsule()
-                            .fill(subject.color)
-                            .frame(width: geometry.size.width * subject.duration / max(stats.total, 1))
-                    }
-                    .frame(height: 4)
-                }
-            }
-        }
     }
 }
 

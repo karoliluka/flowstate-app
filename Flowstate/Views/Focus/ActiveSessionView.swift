@@ -22,15 +22,9 @@ struct ActiveSessionView: View {
 
             if let startedAt = session.startedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let elapsed = context.date.timeIntervalSince(startedAt)
-                    let isBreak = session.pomodoro?.state(elapsed: elapsed).phase == .rest
                     VStack(spacing: 0) {
-                        if let pomodoro = session.pomodoro {
-                            PomodoroDisplay(config: pomodoro, startedAt: startedAt, now: context.date)
-                        } else {
-                            StopwatchDisplay(elapsed: elapsed)
-                        }
-                        Text(blockingStatus(isBreak: isBreak))
+                        StopwatchDisplay(elapsed: context.date.timeIntervalSince(startedAt))
+                        Text(blockingStatus)
                             .font(.footnote)
                             .foregroundStyle(.white.opacity(0.5))
                             .padding(.top, 8)
@@ -51,12 +45,9 @@ struct ActiveSessionView: View {
         .preferredColorScheme(.dark)
     }
 
-    private func blockingStatus(isBreak: Bool) -> String {
+    private var blockingStatus: String {
         if !ScreenTime.isAvailable { return "Preview build · apps aren't blocked" }
         if !blocking.isAuthorized { return "Apps aren't blocked. Allow Screen Time access first" }
-        if isBreak {
-            return session.breakStaysBlocked ? "Apps stay blocked during this break" : "Apps are unlocked until the break ends"
-        }
         return "Distracting apps are blocked"
     }
 }
@@ -81,59 +72,6 @@ private struct StopwatchDisplay: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
         }
-    }
-}
-
-/// Counts down the current focus or break phase.
-private struct PomodoroDisplay: View {
-    @Environment(EarnedTimeManager.self) private var earned
-    let config: PomodoroConfig
-    let startedAt: Date
-    let now: Date
-
-    var body: some View {
-        let state = config.state(elapsed: now.timeIntervalSince(startedAt))
-        let isFocus = state.phase == .focus
-        let phaseLength = isFocus ? config.focus : config.rest
-        let earnedSoFar = config.focusBlocks(from: startedAt, to: now)
-            .reduce(0) { $0 + earned.earned(for: $1.end.timeIntervalSince($1.start)) }
-
-        VStack(spacing: 10) {
-            Text(isFocus ? "Focus · round \(state.round)" : "Break")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(isFocus ? 0.9 : 0.6))
-
-            Text(state.remaining.rounded(.up).clockFormatted)
-                .font(.system(size: 76, weight: .thin, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .opacity(isFocus ? 1 : 0.7)
-
-            // Phase progress
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.12))
-                    Capsule()
-                        .fill(.white.opacity(isFocus ? 1 : 0.5))
-                        .frame(width: geometry.size.width * (1 - state.remaining / phaseLength))
-                }
-            }
-            .frame(width: 180, height: 4)
-
-            Text("\(state.focused.focusFormatted) focused · +\((earnedSoFar * 60).focusFormatted) earned")
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.top, 6)
-
-            if !isFocus {
-                Text("Stand up, stretch, drink some water.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-        }
-        .sensoryFeedback(.impact(weight: .heavy), trigger: state.phase)
-        .animation(.easeInOut, value: state.phase)
     }
 }
 

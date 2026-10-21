@@ -6,6 +6,8 @@ struct FlowstateApp: App {
     @State private var blocking: BlockingManager
     @State private var session: SessionManager
     @State private var earned: EarnedTimeManager
+    @State private var showingIntro = true
+    @Environment(\.scenePhase) private var scenePhase
     private let modelContainer: ModelContainer
 
     init() {
@@ -30,10 +32,24 @@ struct FlowstateApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(blocking)
-                .environment(session)
-                .environment(earned)
+            ZStack {
+                RootView()
+                    .environment(blocking)
+                    .environment(session)
+                    .environment(earned)
+                // The app switcher shows a snapshot taken as the app leaves: make it the logo.
+                if scenePhase != .active && !showingIntro {
+                    LogoScreen()
+                        .zIndex(1)
+                }
+                if showingIntro {
+                    IntroView {
+                        withAnimation(.easeInOut(duration: 0.9)) { showingIntro = false }
+                    }
+                    .transition(.opacity)
+                    .zIndex(1)
+                }
+            }
         }
         .modelContainer(modelContainer)
     }

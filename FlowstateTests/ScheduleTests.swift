@@ -46,19 +46,14 @@ struct ScheduleTests {
         #expect(!window.isShort)
     }
 
-    @Test func activityNamesTellTheExtensionWhatToDo() {
-        let shortBreak = DeviceActivityName.pomodoroBreak(3, short: true)
-        #expect(shortBreak.isPomodoro && shortBreak.isPomodoroBreak && shortBreak.endsAtWarning)
-        #expect(shortBreak.pomodoroRound == 3)
-        #expect(!shortBreak.isUnlock)
-
-        let relock = DeviceActivityName.pomodoroRelock(12, short: false)
-        #expect(relock.isPomodoro && !relock.isPomodoroBreak && !relock.endsAtWarning)
-        #expect(relock.pomodoroRound == 12)
-
+    @Test func activityNamesTellTheExtensionWhichCallbackEndsTheUnlock() {
         let pass = DeviceActivityName.unlock(short: true)
-        #expect(pass.isUnlock && pass.endsAtWarning && !pass.isPomodoro)
-        #expect(pass.pomodoroRound == nil)
+        #expect(pass.isUnlock && pass.endsAtWarning)
+
+        let unlock = DeviceActivityName.unlock(short: false)
+        #expect(unlock.isUnlock && !unlock.endsAtWarning)
+
         #expect(DeviceActivityName.allUnlocks.allSatisfy { $0.isUnlock })
+        #expect(!DeviceActivityName("something.else").isUnlock)
     }
 }

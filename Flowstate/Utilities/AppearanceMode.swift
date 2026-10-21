@@ -39,7 +39,4 @@ enum StorageKeys {
     static let selectedSubjectID = "selectedSubjectID"
     static let selectedTab = "selectedTab"
     static let statsRange = "statsRange"
-    static let pomodoroEnabled = "pomodoro.enabled"
-    static let pomodoroFocus = "pomodoro.focusMinutes"
-    static let pomodoroBreak = "pomodoro.breakMinutes"
 }

@@ -39,11 +39,6 @@ struct ProfileView: View {
                     .listRowInsets(EdgeInsets())
                 }
 
-                Section("All time") {
-                    LabeledContent("Focused", value: allTime.focusFormatted)
-                    LabeledContent("Sessions", value: "\(sessions.count)")
-                }
-
                 Section("Milestones") {
                     MilestonesView(hours: allTime / 3600)
                         .padding(.vertical, 6)

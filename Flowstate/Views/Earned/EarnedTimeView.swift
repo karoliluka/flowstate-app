@@ -10,6 +10,8 @@ struct EarnedTimeView: View {
     /// The picker edits a copy; it's handed to `requestDistracting` when the picker closes.
     @State private var draft = FamilyActivitySelection()
     @State private var draftStart = FamilyActivitySelection()
+    /// An easier mode waiting for the user to confirm the cooldown.
+    @State private var confirmingMode: EarnMode?
 
     var body: some View {
         NavigationStack {
@@ -48,7 +50,7 @@ struct EarnedTimeView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("How you earn")
                             .font(.title3.weight(.semibold))
-                        Picker("Mode", selection: Binding(get: { earned.pendingMode?.mode ?? earned.mode }, set: { earned.requestMode($0) })) {
+                        Picker("Mode", selection: Binding(get: { earned.pendingMode?.mode ?? earned.mode }, set: chooseMode)) {
                             ForEach(EarnMode.allCases) { Text($0.title).tag($0) }
                         }
                         .pickerStyle(.segmented)
@@ -82,6 +84,16 @@ struct EarnedTimeView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert(
+                confirmingMode.map { "Switch to \($0.title)?" } ?? "",
+                isPresented: Binding(get: { confirmingMode != nil }, set: { if !$0 { confirmingMode = nil } }),
+                presenting: confirmingMode
+            ) { mode in
+                Button("Switch in \(Int(EarnedTimeManager.loosenDelay / 60)) min") { earned.requestMode(mode) }
+                Button("Keep \(earned.mode.title)", role: .cancel) {}
+            } message: { mode in
+                Text("\(mode.title) is easier, so it starts in \(Int(EarnedTimeManager.loosenDelay / 60)) minutes. That way it's a decision, not an impulse. Until then \(earned.mode.title) rules apply, and you can still cancel.")
+            }
             .familyActivityPicker(isPresented: $showingPicker, selection: $draft)
             .onChange(of: showingPicker) { _, showing in
                 // Cancelling the picker leaves the draft untouched; don't restart a pending cooldown then.
@@ -89,6 +101,15 @@ struct EarnedTimeView: View {
                     earned.requestDistracting(draft)
                 }
             }
+        }
+    }
+
+    /// Stricter modes apply right away; easier ones ask first, because they wait out the cooldown.
+    private func chooseMode(_ mode: EarnMode) {
+        if mode.isEasier(than: earned.mode) && earned.pendingMode?.mode != mode {
+            confirmingMode = mode
+        } else {
+            earned.requestMode(mode)
         }
     }
 
@@ -251,7 +272,7 @@ private struct BalanceRing: View {
                     .contentTransition(.numericText())
                 Text("earned")
                     .foregroundStyle(.secondary)
-                Text("of \(Int(cap))m max")
+                Text("save up to \(Int(cap))m")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .contentTransition(.numericText())
@@ -362,13 +383,13 @@ private struct DeepFocusCard: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            Text("Stay in one session for 45 minutes and the whole session earns **1.5×**.")
+            Text("Focus for **45 minutes or more** in one go, and that whole session earns **50% more** scrolling time.")
                 .font(.subheadline)
 
             Divider()
 
             HStack {
-                Text("1 hour session")
+                Text("A 1 hour session earns")
                 Spacer()
                 Text("\(Int(normalHour))m")
                     .strikethrough()
@@ -387,14 +408,14 @@ private struct DeepFocusCard: View {
 private struct PriceCard: View {
     let unlockedToday: Double
 
-    private let labels = ["First 30 min", "30–60 min", "After 1 h"]
+    private let labels = ["First 30 min", "Next 30 min", "After 1 h"]
 
     var body: some View {
         let tiers = EarnedTimeManager.priceTiers
         let current = tiers.firstIndex { unlockedToday < $0.upTo } ?? tiers.count - 1
 
         Card {
-            CardTitle(title: "Scrolling gets pricier", icon: "chart.bar.fill")
+            CardTitle(title: "Scrolling costs more the more you scroll", icon: "chart.bar.fill")
 
             HStack(alignment: .bottom, spacing: 8) {
                 ForEach(tiers.indices, id: \.self) { index in
@@ -417,7 +438,7 @@ private struct PriceCard: View {
             }
             .padding(.top, 4)
 
-            Text("The more you unlock in a day, the more each minute costs. Resets at midnight.")
+            Text("Each minute of scrolling you unlock is paid with earned time. Your first 30 minutes of the day cost 1 minute each, the next 30 cost 1.5, and after an hour every minute costs 2. So 15 minutes costs 15m at first, but 30m late in the day. It resets at midnight.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

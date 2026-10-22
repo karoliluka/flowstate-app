@@ -12,14 +12,6 @@
   <img src="docs/banner.jpg" alt="flowstate: a focus session and a year of stats on two iPhones">
 </p>
 
-<p align="center">
-  <img src="marketing/screenshots/dark/02-home.png" alt="Home" width="19%">
-  <img src="marketing/screenshots/dark/03-session.png" alt="Focus session" width="19%">
-  <img src="marketing/screenshots/dark/04-earned.png" alt="Earned time" width="19%">
-  <img src="marketing/screenshots/dark/06-subject-detail.png" alt="Subject" width="19%">
-  <img src="marketing/screenshots/dark/09-stats-year.png" alt="Stats" width="19%">
-</p>
-
 ## Why flowstate
 
 As a student, I kept losing study sessions to social media. The only thing that worked was leaving my phone in another room. Then school went digital. Assignments, schedules, and class chats all lived on my phone, so it stayed within reach, and so did the distractions. My productive sessions slowly became unproductive ones.
@@ -72,4 +64,12 @@ Time focused today, this week, month and year, with a streak, a calendar of ever
 ## Privacy
 Everything stays on your phone. Apple's Screen Time keeps app choices private: flowstate never learns which apps you pick, only opaque tokens for blocking them.
 
+## App design
+<p align="center">
+  <img src="marketing/screenshots/dark/02-home.png" alt="Home" width="19%">
+  <img src="marketing/screenshots/dark/03-session.png" alt="Focus session" width="19%">
+  <img src="marketing/screenshots/dark/04-earned.png" alt="Earned time" width="19%">
+  <img src="marketing/screenshots/dark/06-subject-detail.png" alt="Subject" width="19%">
+  <img src="marketing/screenshots/dark/09-stats-year.png" alt="Stats" width="19%">
+</p>
 ---

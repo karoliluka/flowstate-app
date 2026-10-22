@@ -1,6 +1,24 @@
-# flowstate
+<p align="center">
+  <img src="docs/logo.png" alt="flowstate logo" width="120">
+</p>
 
-**Today everything is fighting for your attention. flowstate is for people who still value theirs.**
+<h1 align="center">flowstate</h1>
+
+<p align="center">
+  <b>Today everything is fighting for your attention. flowstate is for people who still value theirs.</b>
+</p>
+
+<p align="center">
+  <img src="docs/banner.jpg" alt="flowstate: a focus session and a year of stats on two iPhones">
+</p>
+
+<p align="center">
+  <img src="marketing/screenshots/dark/02-home.png" alt="Home" width="19%">
+  <img src="marketing/screenshots/dark/03-session.png" alt="Focus session" width="19%">
+  <img src="marketing/screenshots/dark/04-earned.png" alt="Earned time" width="19%">
+  <img src="marketing/screenshots/dark/06-subject-detail.png" alt="Subject" width="19%">
+  <img src="marketing/screenshots/dark/09-stats-year.png" alt="Stats" width="19%">
+</p>
 
 ## Why flowstate
 

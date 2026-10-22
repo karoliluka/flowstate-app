@@ -45,20 +45,22 @@ struct ProfileView: View {
                 }
 
                 #if DEBUG
-                Section {
-                    Button("Load sample data") {
-                        confirmingSampleData = true
+                if !MarketingMode.isOn {
+                    Section {
+                        Button("Load sample data") {
+                            confirmingSampleData = true
+                        }
+                        Button("Add 30 min earned time") {
+                            earned.debugAddBalance(30)
+                        }
+                        Button("Delete all data", role: .destructive) {
+                            confirmingDeleteAll = true
+                        }
+                    } header: {
+                        Text("Developer")
+                    } footer: {
+                        Text("Only visible in debug builds.")
                     }
-                    Button("Add 30 min earned time") {
-                        earned.debugAddBalance(30)
-                    }
-                    Button("Delete all data", role: .destructive) {
-                        confirmingDeleteAll = true
-                    }
-                } header: {
-                    Text("Developer")
-                } footer: {
-                    Text("Only visible in debug builds.")
                 }
                 #endif
             }

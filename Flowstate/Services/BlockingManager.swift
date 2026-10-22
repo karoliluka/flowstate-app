@@ -38,7 +38,7 @@ final class BlockingManager {
     }
 
     func refreshAuthorization() {
-        isAuthorized = ScreenTime.isAvailable && AuthorizationCenter.shared.authorizationStatus == .approved
+        isAuthorized = MarketingMode.isOn || (ScreenTime.isAvailable && AuthorizationCenter.shared.authorizationStatus == .approved)
     }
 
     func startBlocking() {

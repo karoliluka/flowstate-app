@@ -135,6 +135,7 @@ final class EarnedTimeManager {
     }
 
     var isEnabled: Bool {
+        MarketingMode.isOn ||
         !distracting.applicationTokens.isEmpty || !distracting.categoryTokens.isEmpty || !distracting.webDomainTokens.isEmpty
     }
 

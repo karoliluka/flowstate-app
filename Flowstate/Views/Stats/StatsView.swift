@@ -9,6 +9,8 @@ struct StatsView: View {
     @Query(sort: \FocusSession.startedAt, order: .reverse) private var allSessions: [FocusSession]
     @AppStorage(StorageKeys.statsRange) private var range: StatsRange = .week
     @Namespace private var calendarZoom
+    @Environment(\.comparisonSeed) private var comparisonSeed
+    @Environment(NotificationRouter.self) private var router
 
     var body: some View {
         let stats = Stats(sessions: allSessions, range: range, now: today)
@@ -42,7 +44,7 @@ struct StatsView: View {
                         } else {
                             section("Daily focus") { dailyChart(stats) }
                         }
-                        if !FocusComparisons.matches(for: stats.total).isEmpty {
+                        if !FocusComparisons.matches(for: stats.total, seed: comparisonSeed).isEmpty {
                             section("That's like") { ComparisonCards(total: stats.total) }
                         }
                     }
@@ -50,6 +52,15 @@ struct StatsView: View {
                 .padding()
             }
             .navigationTitle("Stats")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        router.showRecap(for: today)
+                    } label: {
+                        Label("Weekly recap", systemImage: "sparkles")
+                    }
+                }
+            }
             .navigationDestination(for: CalendarMonth.self) { month in
                 MonthDetailView(month: month, namespace: calendarZoom)
                     .zoomTransition(id: month, in: calendarZoom)
@@ -128,48 +139,6 @@ struct StatTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.05)))
-    }
-}
-
-// MARK: - Comparisons
-
-/// Swipeable cards comparing focus time with everyday things.
-private struct ComparisonCards: View {
-    let total: TimeInterval
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 12) {
-                ForEach(FocusComparisons.matches(for: total), id: \.comparison.id) { match in
-                    VStack(alignment: .leading, spacing: 0) {
-                        Image(systemName: match.comparison.icon)
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 16)
-                        Text(FocusComparisons.formatCount(match.count) + "×")
-                            .font(.system(size: 44, weight: .light, design: .rounded))
-                            .monospacedDigit()
-                        Text(match.comparison.name)
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(2, reservesSpace: true)
-                        Text(match.comparison.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .padding(.top, 2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-                    .frame(height: 200)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color.primary.opacity(0.05)))
-                    .containerRelativeFrame(.horizontal) { width, _ in width * 0.62 }
-                }
-            }
-            .scrollTargetLayout()
-        }
-        .scrollTargetBehavior(.viewAligned)
-        .scrollIndicators(.hidden)
-        .scrollClipDisabled()
     }
 }
 

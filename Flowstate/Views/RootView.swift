@@ -5,14 +5,19 @@ struct RootView: View {
     @Environment(SessionManager.self) private var session
     @Environment(EarnedTimeManager.self) private var earned
     @Environment(BlockingManager.self) private var blocking
+    @Environment(NotificationRouter.self) private var router
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(StorageKeys.appearance) private var appearance: AppearanceMode = .system
     @AppStorage(StorageKeys.selectedTab) private var selectedTab = 0
     /// Moves on at midnight, so "today" totals and stats ranges don't go stale while the app stays open.
     @State private var today = Calendar.current.startOfDay(for: .now)
+    /// New every time the app opens, so the "That's like" comparisons change.
+    @State private var comparisonSeed = UInt64.random(in: .min ... .max)
 
     var body: some View {
+        @Bindable var router = router
+
         TabView(selection: $selectedTab) {
             FocusView(today: today)
                 .tabItem { Label("Focus", systemImage: "stopwatch") }
@@ -37,7 +42,12 @@ struct RootView: View {
                 blocking.refreshAuthorization()
                 earned.refresh()
                 today = Calendar.current.startOfDay(for: .now)
+                comparisonSeed = UInt64.random(in: .min ... .max)
+                Task { await FocusNotifications.reschedule(context: context) }
             }
+        }
+        .sheet(item: $router.recap) { week in
+            WeeklyRecapView(weekStart: week.start)
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
             today = Calendar.current.startOfDay(for: .now)
@@ -49,6 +59,7 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+        .environment(\.comparisonSeed, comparisonSeed)
         #if DEBUG
         .task {
             if ProcessInfo.processInfo.arguments.contains("-loadSampleData") {

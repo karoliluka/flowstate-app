@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 
 @main
 struct FlowstateApp: App {
@@ -16,6 +17,8 @@ struct FlowstateApp: App {
         _blocking = State(initialValue: blocking)
         _earned = State(initialValue: earned)
         _session = State(initialValue: SessionManager(blocking: blocking, earned: earned))
+        // Set before launch finishes, so tapping a notification that opened the app is handled.
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared
 
         // Keep the store in the app's own container. By default SwiftData moves it into the
         // App Group when the build has one, so the Preview build (which doesn't) would see
@@ -37,6 +40,7 @@ struct FlowstateApp: App {
                     .environment(blocking)
                     .environment(session)
                     .environment(earned)
+                    .environment(NotificationRouter.shared)
                 // The app switcher shows a snapshot taken as the app leaves: make it the logo.
                 if scenePhase != .active && !showingIntro {
                     LogoScreen()

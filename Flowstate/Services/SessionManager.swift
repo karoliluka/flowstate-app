@@ -10,6 +10,10 @@ struct SessionSummary {
     let earnedMinutes: Double
     let balanceFull: Bool
     let focusedToday: TimeInterval
+    /// The all-time hour milestone this session crossed, if any.
+    let milestoneHours: Double?
+    /// Longer than every earlier session.
+    let personalBest: Bool
 
     var deepFocus: Bool { duration >= EarnedTimeManager.deepFocusThreshold }
 }
@@ -72,11 +76,19 @@ final class SessionManager {
 
         let duration = endedAt.timeIntervalSince(startedAt)
         let saved = duration >= Self.minimumDuration
+        let earlier = (try? context.fetch(FetchDescriptor<FocusSession>())) ?? []
+        let totalBefore = earlier.reduce(0) { $0 + $1.duration }
+        let longestBefore = earlier.map(\.duration).max() ?? 0
+
         var earnedMinutes = 0.0
+        var milestone: Double?
+        var personalBest = false
         if saved {
             context.insert(FocusSession(startedAt: startedAt, endedAt: endedAt, subject: subject))
             try? context.save()
             earnedMinutes = earned.credit(sessionDuration: duration)
+            milestone = FocusComparisons.milestoneHours.last { totalBefore < $0 * 3600 && totalBefore + duration >= $0 * 3600 }
+            personalBest = longestBefore > 0 && duration > longestBefore
         }
         summary = SessionSummary(
             duration: duration,
@@ -84,8 +96,16 @@ final class SessionManager {
             saved: saved,
             earnedMinutes: earnedMinutes,
             balanceFull: earned.isBalanceFull,
-            focusedToday: focusedToday(in: context)
+            focusedToday: focusedToday(in: context),
+            milestoneHours: milestone,
+            personalBest: personalBest
         )
+
+        Task {
+            if let milestone { await FocusNotifications.celebrateMilestone(hours: milestone) }
+            if personalBest { await FocusNotifications.celebratePersonalBest(duration: duration) }
+            await FocusNotifications.reschedule(context: context)
+        }
     }
 
     func dismissSummary() {

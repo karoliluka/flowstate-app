@@ -4,6 +4,7 @@ import SwiftData
 struct FocusView: View {
     @Environment(SessionManager.self) private var session
     @Environment(BlockingManager.self) private var blocking
+    @Environment(NotificationRouter.self) private var router
 
     @Query(sort: \Subject.createdAt) private var subjects: [Subject]
     @Query private var todaySessions: [FocusSession]
@@ -96,9 +97,10 @@ struct FocusView: View {
             .navigationBarTitleDisplayMode(.inline)
             #if DEBUG
             .onAppear {
-                // Launch with `-debugSheet earned|profile|allowed` to open a sheet directly.
+                // Launch with `-debugSheet earned|profile|allowed|recap` to open a sheet directly.
                 switch UserDefaults.standard.string(forKey: "debugSheet") {
                 case "allowed": showingAllowedApps = true
+                case "recap": router.showRecap(for: .now)
                 case "earned": showingEarned = true
                 case "profile": showingProfile = true
                 default: break

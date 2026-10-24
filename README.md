@@ -61,6 +61,14 @@ Out of time but really need an app? You get **3 emergency passes a day**, 5 minu
 ### Stats
 Time focused today, this week, month and year, with a streak, a calendar of every day, and comparisons like "that's 2.6 Harry Potter movie marathons". Each subject has its own page with a weekly goal, its history and a chart. Milestones go from your first hour up to 10,000 hours.
 
+### Notifications
+All optional, switched on and off in **Profile → Notifications**:
+- **Morning nudge** (8:00): how long you focused yesterday and on what, after days you focused.
+- **Daily reminder** (your time): only if you haven't focused yet that day. Off until you set it up.
+- **Streak protector** (20:00): when your streak would end at midnight.
+- **Weekly recap** (last day of the week, 18:00): your total, the change from last week and your top subject. Tap it for the recap screen with a chart of the week. It's also under ✦ on the Stats tab.
+- **Milestones** 🏆 and **personal bests** 🥇: shown on the session summary and saved to Notification Center.
+
 ## Privacy
 Everything stays on your phone. Apple's Screen Time keeps app choices private: flowstate never learns which apps you pick, only opaque tokens for blocking them.
 

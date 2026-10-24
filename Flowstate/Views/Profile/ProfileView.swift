@@ -39,6 +39,8 @@ struct ProfileView: View {
                     .listRowInsets(EdgeInsets())
                 }
 
+                NotificationSettingsSection()
+
                 Section("Milestones") {
                     MilestonesView(hours: allTime / 3600)
                         .padding(.vertical, 6)

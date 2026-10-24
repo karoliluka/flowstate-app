@@ -116,6 +116,18 @@ private struct SessionSummaryView: View {
                 .foregroundStyle(.white.opacity(0.7))
             }
 
+            if summary.milestoneHours != nil || summary.personalBest {
+                VStack(spacing: 8) {
+                    if let hours = summary.milestoneHours {
+                        CelebrationBadge(symbol: "trophy.fill", text: "Milestone: \(Int(hours).formatted()) hours of focus")
+                    }
+                    if summary.personalBest {
+                        CelebrationBadge(symbol: "medal.fill", text: "Personal best: your longest session")
+                    }
+                }
+                .padding(.top, 24)
+            }
+
             VStack(spacing: 0) {
                 if summary.saved {
                     if summary.earnedMinutes * 60 < 1 && summary.balanceFull {
@@ -168,6 +180,27 @@ private struct SessionSummaryView: View {
         }
         .font(.subheadline)
         .padding(16)
+    }
+}
+
+/// A gold trophy or medal moment on the session summary.
+private struct CelebrationBadge: View {
+    static let gold = Color(red: 1, green: 0.78, blue: 0.2)
+
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(Self.gold)
+        }
+        .font(.subheadline.weight(.medium))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Capsule().fill(Self.gold.opacity(0.14)))
+        .overlay(Capsule().strokeBorder(Self.gold.opacity(0.35)))
     }
 }
 

@@ -10,12 +10,15 @@ enum SampleData {
 
         let calendar = Calendar.current
         let now = Date.now
+        // One subject per bright preset color.
         let subjects = [
-            Subject(name: "Math", colorHex: SubjectPalette.hexes[0]),
-            Subject(name: "Physics", colorHex: SubjectPalette.hexes[1]),
-            Subject(name: "English", colorHex: SubjectPalette.hexes[2]),
-            Subject(name: "Reading", colorHex: SubjectPalette.hexes[4]),
-            Subject(name: "Side project", colorHex: SubjectPalette.hexes[6]),
+            Subject(name: "Calculus", colorHex: SubjectPalette.hexes[0]),
+            Subject(name: "Biology", colorHex: SubjectPalette.hexes[1]),
+            Subject(name: "Chemistry", colorHex: SubjectPalette.hexes[2]),
+            Subject(name: "History", colorHex: SubjectPalette.hexes[3]),
+            Subject(name: "Coding", colorHex: SubjectPalette.hexes[4]),
+            Subject(name: "Spanish", colorHex: SubjectPalette.hexes[5]),
+            Subject(name: "Guitar", colorHex: SubjectPalette.hexes[6]),
         ]
         subjects.forEach(context.insert)
 

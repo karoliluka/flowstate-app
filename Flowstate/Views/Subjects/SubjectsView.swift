@@ -69,13 +69,7 @@ private struct SubjectRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Circle().fill(subject.color).frame(width: 10, height: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(subject.name)
-                Text("\(subject.thisWeekDuration.focusFormatted) this week · \(subject.totalDuration.focusFormatted) total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
+            Text(subject.name)
         }
         .padding(.vertical, 2)
     }

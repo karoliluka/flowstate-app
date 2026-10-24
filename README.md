@@ -63,9 +63,9 @@ Time focused today, this week, month and year, with a streak, a calendar of ever
 
 ### Notifications
 All optional, switched on and off in **Profile → Notifications**:
-- **Morning nudge** (8:00): how long you focused yesterday and on what, after days you focused.
-- **Daily reminder** (your time): only if you haven't focused yet that day. Off until you set it up.
-- **Streak protector** (20:00): when your streak would end at midnight.
+- **Morning nudge** (you pick a time between 4:00 and 10:00): how long you focused yesterday and on what, after days you focused.
+- **Daily reminder** (you pick an afternoon time, 12:00 to 18:00): only if you haven't logged a focus session yet that day. Off until you set it up.
+- **Streak protector** (any time you pick, 20:00 by default): when your streak would end at midnight.
 - **Weekly recap** (last day of the week, 18:00): your total, the change from last week and your top subject. Tap it for the recap screen with a chart of the week. It's also under ✦ on the Stats tab.
 - **Milestones** 🏆 and **personal bests** 🥇: shown on the session summary and saved to Notification Center.
 

@@ -1,14 +1,16 @@
 import SwiftUI
 import UserNotifications
 
-/// On/off switches for each kind of notification, plus the daily reminder time.
-struct NotificationSettingsSection: View {
+/// Profile → Notifications: each kind on or off, with its own time where it has one.
+struct NotificationSettingsView: View {
     @Environment(\.modelContext) private var context
 
     @AppStorage(NotificationPreferences.morningNudgeKey) private var morningNudge = true
+    @AppStorage(NotificationPreferences.morningNudgeTimeKey) private var morningNudgeTime = NotificationPreferences.defaultMorningTime
     @AppStorage(NotificationPreferences.dailyReminderKey) private var dailyReminder = false
     @AppStorage(NotificationPreferences.dailyReminderTimeKey) private var dailyReminderTime = NotificationPreferences.defaultReminderTime
     @AppStorage(NotificationPreferences.streakProtectorKey) private var streakProtector = true
+    @AppStorage(NotificationPreferences.streakProtectorTimeKey) private var streakProtectorTime = NotificationPreferences.defaultStreakTime
     @AppStorage(NotificationPreferences.weeklyRecapKey) private var weeklyRecap = true
     @AppStorage(NotificationPreferences.milestonesKey) private var milestones = true
     @AppStorage(NotificationPreferences.personalBestsKey) private var personalBests = true
@@ -16,68 +18,123 @@ struct NotificationSettingsSection: View {
     @State private var status: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
-        Section {
-            switch status {
-            case .denied:
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Notifications are off for flowstate in your iPhone's Settings.")
-                        .foregroundStyle(.secondary)
-                    Button("Open Settings") {
-                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
+        Form {
+            permissionSection
+
+            Group {
+                Section {
+                    Toggle("Morning nudge", isOn: $morningNudge)
+                    if morningNudge {
+                        timePicker("Time", minutes: $morningNudgeTime, in: NotificationPreferences.morningRange)
+                    }
+                } footer: {
+                    Text("How long you focused yesterday and on what. Only after days you focused. Between 4:00 and 10:00.")
+                }
+
+                Section {
+                    Toggle("Daily reminder", isOn: $dailyReminder)
+                    if dailyReminder {
+                        timePicker("Time", minutes: $dailyReminderTime, in: NotificationPreferences.reminderRange)
+                    }
+                } footer: {
+                    Text("An afternoon nudge, only if you haven't logged a focus session yet that day. Between 12:00 and 18:00.")
+                }
+
+                Section {
+                    Toggle("Streak protector", isOn: $streakProtector)
+                    if streakProtector {
+                        timePicker("Time", minutes: $streakProtectorTime)
+                    }
+                } footer: {
+                    Text("A heads-up when your streak would end at midnight because you haven't focused yet.")
+                }
+
+                Section {
+                    Toggle("Weekly recap", isOn: $weeklyRecap)
+                } footer: {
+                    Text("Your week in focus, on the last day of the week at 18:00. Tap it for the full recap.")
+                }
+
+                Section {
+                    Toggle(isOn: $milestones) {
+                        Label("Milestones", systemImage: "trophy.fill")
+                    }
+                    Toggle(isOn: $personalBests) {
+                        Label("Personal bests", systemImage: "medal.fill")
+                    }
+                } header: {
+                    Text("Celebrations")
+                } footer: {
+                    Text("When you pass an hour milestone or finish your longest session yet.")
+                }
+            }
+            .disabled(status == .denied)
+
+            #if DEBUG
+            // FOR DEVELOPMENT ONLY: remove this section before the App Store release.
+            Section {
+                ForEach(FocusNotifications.TestKind.allCases) { kind in
+                    Button("Send \(kind.rawValue.lowercased())") {
+                        Task { await FocusNotifications.sendTest(kind) }
                     }
                 }
-            case .notDetermined:
-                Button("Turn on notifications") {
-                    Task { await askPermission() }
-                }
-            default:
-                EmptyView()
+            } header: {
+                Text("Test (development only)")
+            } footer: {
+                Text("Each sample arrives in 5 seconds, so you can lock the phone or leave the app to see it like a user would. Debug builds only. Remove before release.")
             }
-
-            toggle("Morning nudge", detail: "8:00, after days you focused", isOn: $morningNudge)
-            toggle("Daily reminder", detail: "If you haven't focused yet that day", isOn: $dailyReminder)
-            if dailyReminder {
-                DatePicker("Remind me at", selection: reminderTime, displayedComponents: .hourAndMinute)
-            }
-            toggle("Streak protector", detail: "20:00, if your streak is about to end", isOn: $streakProtector)
-            toggle("Weekly recap", detail: "Last day of the week, 18:00", isOn: $weeklyRecap)
-            toggle("Milestones", detail: "When you pass an hour milestone", isOn: $milestones)
-            toggle("Personal bests", detail: "After your longest session yet", isOn: $personalBests)
-        } header: {
-            Text("Notifications")
+            #endif
         }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .animation(.default, value: [morningNudge, dailyReminder, streakProtector])
         .task { status = await FocusNotifications.authorizationStatus() }
         .onChange(of: [morningNudge, dailyReminder, streakProtector, weeklyRecap, milestones, personalBests]) { _, _ in
             Task { await settingsChanged() }
         }
-        .onChange(of: dailyReminderTime) { _, _ in
+        .onChange(of: [morningNudgeTime, dailyReminderTime, streakProtectorTime]) { _, _ in
             Task { await settingsChanged() }
         }
     }
 
-    private func toggle(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail)
-                    .font(.caption)
+    @ViewBuilder
+    private var permissionSection: some View {
+        switch status {
+        case .denied:
+            Section {
+                Text("Notifications are off for flowstate in your iPhone's Settings.")
                     .foregroundStyle(.secondary)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
             }
+        case .notDetermined:
+            Section {
+                Button("Turn on notifications") {
+                    Task { await askPermission() }
+                }
+            }
+        default:
+            EmptyView()
         }
-        .disabled(status == .denied)
     }
 
-    /// The reminder time as a Date for the picker, stored as minutes after midnight.
-    private var reminderTime: Binding<Date> {
-        Binding(
-            get: { Calendar.current.date(bySettingHour: dailyReminderTime / 60, minute: dailyReminderTime % 60, second: 0, of: .now) ?? .now },
+    /// A time of day stored as minutes after midnight, optionally limited to a window.
+    private func timePicker(_ title: String, minutes: Binding<Int>, in range: ClosedRange<Int> = 0...(24 * 60 - 1)) -> some View {
+        let calendar = Calendar.current
+        func date(_ minutes: Int) -> Date {
+            calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: .now) ?? .now
+        }
+        let selection = Binding<Date>(
+            get: { date(minutes.wrappedValue.clamped(to: range)) },
             set: {
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: $0)
-                dailyReminderTime = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+                let parts = calendar.dateComponents([.hour, .minute], from: $0)
+                minutes.wrappedValue = ((parts.hour ?? 0) * 60 + (parts.minute ?? 0)).clamped(to: range)
             }
         )
+        return DatePicker(title, selection: selection, in: date(range.lowerBound)...date(range.upperBound), displayedComponents: .hourAndMinute)
     }
 
     private func settingsChanged() async {

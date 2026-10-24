@@ -94,6 +94,21 @@ struct NotificationPlanTests {
         #expect(plan([session(day: 21, hour: 9, minutes: 60)], preferences).isEmpty)
     }
 
+    @Test func chosenTimesAreUsed() throws {
+        var preferences = NotificationPreferences()
+        preferences.morningNudgeTime = 6 * 60 + 30
+        preferences.streakProtectorTime = 22 * 60 + 15
+        let items = plan([session(day: 21, hour: 9, minutes: 60)], preferences)
+        #expect(try #require(items.first { $0.id.hasPrefix("focus.morning") }).date == date(day: 22, hour: 6, minute: 30))
+        #expect(try #require(items.first { $0.id == "focus.streak.tomorrow" }).date == date(day: 22, hour: 22, minute: 15))
+    }
+
+    @Test func storedTimesOutsideTheirWindowAreClamped() {
+        #expect((2 * 60).clamped(to: NotificationPreferences.morningRange) == 4 * 60)
+        #expect((20 * 60).clamped(to: NotificationPreferences.reminderRange) == 18 * 60)
+        #expect((14 * 60).clamped(to: NotificationPreferences.reminderRange) == 14 * 60)
+    }
+
     @Test func comparisonsAreRandomButRepeatablePerSeed() {
         let total: TimeInterval = 12 * 3600
         let first = FocusComparisons.matches(for: total, seed: 42).map(\.comparison.id)

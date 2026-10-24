@@ -39,7 +39,13 @@ struct ProfileView: View {
                     .listRowInsets(EdgeInsets())
                 }
 
-                NotificationSettingsSection()
+                Section {
+                    NavigationLink {
+                        NotificationSettingsView()
+                    } label: {
+                        Label("Notifications", systemImage: "bell")
+                    }
+                }
 
                 Section("Milestones") {
                     MilestonesView(hours: allTime / 3600)

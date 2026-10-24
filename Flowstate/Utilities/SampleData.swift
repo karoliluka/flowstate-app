@@ -11,10 +11,10 @@ enum SampleData {
         let calendar = Calendar.current
         let now = Date.now
         let subjects = [
-            Subject(name: "Math", colorHex: SubjectPalette.hexes[0], weeklyGoalMinutes: 6 * 60),
-            Subject(name: "Physics", colorHex: SubjectPalette.hexes[1], weeklyGoalMinutes: 4 * 60),
+            Subject(name: "Math", colorHex: SubjectPalette.hexes[0]),
+            Subject(name: "Physics", colorHex: SubjectPalette.hexes[1]),
             Subject(name: "English", colorHex: SubjectPalette.hexes[2]),
-            Subject(name: "Reading", colorHex: SubjectPalette.hexes[4], weeklyGoalMinutes: 3 * 60),
+            Subject(name: "Reading", colorHex: SubjectPalette.hexes[4]),
             Subject(name: "Side project", colorHex: SubjectPalette.hexes[6]),
         ]
         subjects.forEach(context.insert)

@@ -18,10 +18,6 @@ struct SubjectDetailView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if let goal = subject.weeklyGoal, let progress = subject.weeklyProgress {
-                    goalCard(goal: goal, progress: progress)
-                }
-
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     StatTile(title: "This week", value: subject.thisWeekDuration.focusFormatted)
                     StatTile(title: "Total", value: total.focusFormatted)
@@ -68,35 +64,6 @@ struct SubjectDetailView: View {
         }
     }
 
-    private func goalCard(goal: TimeInterval, progress: Double) -> some View {
-        HStack(spacing: 20) {
-            ZStack {
-                GoalRing(progress: progress, color: subject.color, lineWidth: 8)
-                if progress < 1 {
-                    Text(progress.formatted(.percent.precision(.fractionLength(0))))
-                        .font(.system(.subheadline, design: .rounded).weight(.medium))
-                        .monospacedDigit()
-                }
-            }
-            .frame(width: 76, height: 76)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Weekly goal")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("\(subject.thisWeekDuration.focusFormatted) of \(goal.focusFormatted)")
-                    .font(.title3.weight(.medium))
-                    .monospacedDigit()
-                Text(progress >= 1 ? "Goal reached. Nice work." : "\(max(0, goal - subject.thisWeekDuration).focusFormatted) to go")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 20).fill(Color.primary.opacity(0.05)))
-    }
-
     private var weeklyChart: some View {
         let calendar = Calendar.current
         let thisWeek = calendar.dateInterval(of: .weekOfYear, for: .now)!.start
@@ -115,14 +82,6 @@ struct SubjectDetailView: View {
                 )
                 .foregroundStyle(subject.color)
                 .cornerRadius(4)
-            }
-            if let goal = subject.weeklyGoal {
-                RuleMark(y: .value("Goal", goal / 3600))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .foregroundStyle(.secondary)
-                    .annotation(position: .top, alignment: .leading) {
-                        Text("Goal").font(.caption2).foregroundStyle(.secondary)
-                    }
             }
         }
         // Cover the whole current week, so the stride below also has a mark after it

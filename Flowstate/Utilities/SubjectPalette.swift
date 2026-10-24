@@ -1,16 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// Muted preset colors offered when creating a subject. Any other color can be picked too.
+/// Bright preset colors offered when creating a subject. Any other color can be picked too.
 enum SubjectPalette {
     static let hexes: [String] = [
-        "5C789E", // slate blue
-        "6B9478", // sage
-        "C78C5C", // clay
-        "AB6B78", // rose
-        "8C7AAD", // lavender
-        "CCB366", // ochre
-        "6699A6", // teal
+        "0A84FF", // blue
+        "30D158", // green
+        "FF9F0A", // orange
+        "FF375F", // pink
+        "BF5AF2", // purple
+        "FFD60A", // yellow
+        "64D2FF", // cyan
     ]
 
     static func hex(at index: Int) -> String {

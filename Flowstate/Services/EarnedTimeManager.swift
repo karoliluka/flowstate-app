@@ -163,10 +163,18 @@ final class EarnedTimeManager {
         return duration >= Self.deepFocusThreshold ? minutes * Self.deepFocusBonus : minutes
     }
 
-    func credit(sessionDuration duration: TimeInterval) {
+    /// Adds a session's earnings. Returns the minutes actually added, which is less once the balance is full.
+    @discardableResult
+    func credit(sessionDuration duration: TimeInterval) -> Double {
         resetIfNewDay()
+        let before = balance
         balance = min(mode.cap, balance + earned(for: duration))
         save()
+        return balance - before
+    }
+
+    var isBalanceFull: Bool {
+        balance >= mode.cap - 0.001
     }
 
     // MARK: - Spending

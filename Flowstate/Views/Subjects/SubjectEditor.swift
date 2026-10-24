@@ -15,7 +15,6 @@ struct SubjectEditor: View {
 
     @State private var name = ""
     @State private var colorHex = SubjectPalette.hexes[0]
-    @State private var weeklyGoalHours = 0
     @FocusState private var nameFocused: Bool
 
     private var trimmedName: String {
@@ -72,15 +71,6 @@ struct SubjectEditor: View {
                     }
                     .padding(.vertical, 6)
                 }
-
-                Section {
-                    Picker("Weekly goal", selection: $weeklyGoalHours) {
-                        Text("None").tag(0)
-                        ForEach(1...40, id: \.self) { Text("\($0) h").tag($0) }
-                    }
-                } footer: {
-                    Text("How many hours you want to spend on this each week.")
-                }
             }
             .navigationTitle(subject == nil ? "New subject" : "Edit subject")
             .navigationBarTitleDisplayMode(.inline)
@@ -97,7 +87,6 @@ struct SubjectEditor: View {
                 if let subject {
                     name = subject.name
                     colorHex = subject.colorHex
-                    weeklyGoalHours = subject.weeklyGoalMinutes / 60
                 } else {
                     colorHex = SubjectPalette.hex(at: allSubjects.count)
                     nameFocused = true
@@ -123,9 +112,8 @@ struct SubjectEditor: View {
         if let subject {
             subject.name = trimmedName
             subject.colorHex = colorHex
-            subject.weeklyGoalMinutes = weeklyGoalHours * 60
         } else {
-            let newSubject = Subject(name: trimmedName, colorHex: colorHex, weeklyGoalMinutes: weeklyGoalHours * 60)
+            let newSubject = Subject(name: trimmedName, colorHex: colorHex)
             context.insert(newSubject)
             onCreate(newSubject)
         }

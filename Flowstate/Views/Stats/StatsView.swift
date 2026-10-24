@@ -8,6 +8,7 @@ struct StatsView: View {
 
     @Query(sort: \FocusSession.startedAt, order: .reverse) private var allSessions: [FocusSession]
     @AppStorage(StorageKeys.statsRange) private var range: StatsRange = .week
+    @Namespace private var calendarZoom
 
     var body: some View {
         let stats = Stats(sessions: allSessions, range: range, now: today)
@@ -36,7 +37,7 @@ struct StatsView: View {
                     } else {
                         if range == .year {
                             section("Every day") {
-                                YearHeatmap(months: stats.months, dailyTotals: stats.dailyTotals)
+                                YearHeatmap(months: stats.months, days: stats.dailyFocus, namespace: calendarZoom)
                             }
                         } else {
                             section("Daily focus") { dailyChart(stats) }
@@ -49,6 +50,14 @@ struct StatsView: View {
                 .padding()
             }
             .navigationTitle("Stats")
+            .navigationDestination(for: CalendarMonth.self) { month in
+                MonthDetailView(month: month, namespace: calendarZoom)
+                    .zoomTransition(id: month, in: calendarZoom)
+            }
+            .navigationDestination(for: CalendarDay.self) { day in
+                DayDetailView(day: day)
+                    .zoomTransition(id: day, in: calendarZoom)
+            }
         }
     }
 
@@ -166,18 +175,25 @@ private struct ComparisonCards: View {
 
 // MARK: - Year heatmap
 
-/// Twelve small month calendars; the darker a day, the longer you focused.
+/// Twelve small month calendars. Each day takes the color of the subject focused on most,
+/// stronger the longer the day's focus. Tapping a month zooms into it.
 private struct YearHeatmap: View {
     let months: [Date]
-    let dailyTotals: [Date: TimeInterval]
+    let days: [Date: DayFocus]
+    let namespace: Namespace.ID
 
     var body: some View {
-        let maxDay = dailyTotals.values.max() ?? 1
+        let maxDay = days.values.map(\.total).max() ?? 1
 
         VStack(alignment: .leading, spacing: 16) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: 3), spacing: 18) {
                 ForEach(months, id: \.self) { month in
-                    MonthGrid(month: month, dailyTotals: dailyTotals, maxDay: maxDay)
+                    let target = CalendarMonth(start: month)
+                    NavigationLink(value: target) {
+                        MonthGrid(month: month, days: days, maxDay: maxDay)
+                    }
+                    .buttonStyle(.plain)
+                    .zoomSource(id: target, in: namespace)
                 }
             }
 
@@ -185,7 +201,7 @@ private struct YearHeatmap: View {
                 Text("Less")
                 ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(HeatmapStyle.fill(level: level))
+                        .fill(level == 0 ? Color.primary.opacity(0.07) : Color.primary.opacity(0.25 + 0.75 * level))
                         .frame(width: 10, height: 10)
                 }
                 Text("More")
@@ -193,20 +209,23 @@ private struct YearHeatmap: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Text("Each day shows the color of the subject you focused on most. Tap a month to see it up close.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
 
 private struct MonthGrid: View {
     let month: Date
-    let dailyTotals: [Date: TimeInterval]
+    let days: [Date: DayFocus]
     let maxDay: TimeInterval
 
     var body: some View {
         let calendar = Calendar.current
-        let days = calendar.range(of: .day, in: .month, for: month)!.count
-        let firstWeekday = calendar.component(.weekday, from: month)
-        let leadingBlanks = (firstWeekday - calendar.firstWeekday + 7) % 7
+        let dayCount = calendar.range(of: .day, in: .month, for: month)!.count
+        let blanks = calendar.leadingBlanks(forMonthStarting: month)
         let today = calendar.startOfDay(for: .now)
 
         VStack(alignment: .leading, spacing: 6) {
@@ -215,26 +234,19 @@ private struct MonthGrid: View {
                 .foregroundStyle(.secondary)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
-                ForEach(0..<(leadingBlanks + days), id: \.self) { index in
-                    if index < leadingBlanks {
+                ForEach(0..<(blanks + dayCount), id: \.self) { index in
+                    if index < blanks {
                         Color.clear.aspectRatio(1, contentMode: .fit)
                     } else {
-                        let day = calendar.date(byAdding: .day, value: index - leadingBlanks, to: month)!
-                        let level = day > today ? nil : (dailyTotals[day] ?? 0) / maxDay
+                        let day = calendar.date(byAdding: .day, value: index - blanks, to: month)!
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(level.map { HeatmapStyle.fill(level: $0) } ?? Color.primary.opacity(0.02))
+                            .fill(day > today ? HeatmapStyle.future : HeatmapStyle.fill(days[day], maxDay: maxDay))
                             .aspectRatio(1, contentMode: .fit)
                     }
                 }
             }
         }
-    }
-}
-
-private enum HeatmapStyle {
-    /// Monochrome so it reads well in light and dark mode.
-    static func fill(level: Double) -> Color {
-        level <= 0 ? Color.primary.opacity(0.07) : Color.primary.opacity(0.2 + 0.75 * min(level, 1))
+        .contentShape(Rectangle())
     }
 }
 
@@ -290,8 +302,8 @@ private struct Stats {
     let streak: Int
     let subjects: [SubjectTotal]
     let bars: [Bar]
-    /// Total focus per day, keyed by start of day.
-    let dailyTotals: [Date: TimeInterval]
+    /// Focus per day, keyed by start of day.
+    let dailyFocus: [Date: DayFocus]
     /// Start of each month in the range (used by the year view).
     let months: [Date]
 
@@ -311,7 +323,6 @@ private struct Stats {
 
         var bySubject: [String: SubjectTotal] = [:]
         var byBar: [String: Bar] = [:]
-        var byDay: [Date: TimeInterval] = [:]
         for session in sessions {
             let key = session.subject?.uuid.uuidString ?? "none"
             let existing = bySubject[key]?.duration ?? 0
@@ -323,14 +334,13 @@ private struct Stats {
             )
 
             let day = calendar.startOfDay(for: session.startedAt)
-            byDay[day, default: 0] += session.duration
 
             let barKey = "\(day.timeIntervalSince1970)-\(key)"
             byBar[barKey] = Bar(date: day, subjectKey: key, duration: (byBar[barKey]?.duration ?? 0) + session.duration)
         }
         subjects = bySubject.values.sorted { $0.duration > $1.duration }
         bars = Array(byBar.values)
-        dailyTotals = byDay
+        dailyFocus = DayFocus.byDay(sessions, calendar: calendar)
         months = range == .year
             ? (0..<12).map { calendar.date(byAdding: .month, value: $0, to: start)! }
             : []

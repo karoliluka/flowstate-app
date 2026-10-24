@@ -15,7 +15,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             FocusView(today: today)
-                .tabItem { Label("Focus", systemImage: "circle.circle") }
+                .tabItem { Label("Focus", systemImage: "stopwatch") }
                 .tag(0)
             SubjectsView()
                 .tabItem { Label("Subjects", systemImage: "square.stack") }
@@ -24,8 +24,8 @@ struct RootView: View {
                 .tabItem { Label("Stats", systemImage: "chart.bar") }
                 .tag(2)
         }
-        // The session screen can only be left by ending the session.
-        .fullScreenCover(isPresented: Binding(get: { session.isActive }, set: { _ in })) {
+        // The session screen can only be left by ending the session, then closing its summary.
+        .fullScreenCover(isPresented: Binding(get: { session.isActive || session.summary != nil }, set: { _ in })) {
             ActiveSessionView()
         }
         .onChange(of: appearance, initial: true) { _, mode in

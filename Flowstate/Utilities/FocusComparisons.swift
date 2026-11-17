@@ -7,6 +7,8 @@ struct FocusComparison: Identifiable {
     let name: String
     let detail: String
     let duration: TimeInterval
+
+    var shortName: String { FocusComparisons.shortNames[id] ?? name }
 }
 
 enum FocusComparisons {
@@ -58,6 +60,40 @@ enum FocusComparisons {
             .shuffled(using: &generator)
             .prefix(limit)
             .sorted { $0.0.duration > $1.0.duration }
+    }
+
+    /// Names that fit the Live Activity, where space is tight. Others use `name`.
+    static let shortNames: [String: String] = [
+        "tiktok": "TikToks skipped", "tea": "cups of tea", "sunlight": "sunlight trips", "mars": "messages to Mars",
+        "beethoven": "Beethoven 9ths", "f1": "F1 races", "charge": "iPhone charges", "iss": "ISS orbits",
+        "film": "films", "shinkansen": "bullet trains", "titanic": "Titanics", "superbowl": "Super Bowls",
+        "marathon": "marathons", "tour": "Tour stages", "flight": "flights to NYC", "hobbit": "Hobbit audiobooks",
+        "ironman": "Ironmans", "lotr": "LOTR trilogies", "potter": "Potter marathons", "earth": "Earth spins",
+        "apollo": "Moon trips", "transsib": "Trans-Siberians",
+    ]
+
+    /// How far ahead the Live Activity's goals lie: one soon, one later, one far.
+    static let goalWindows: [ClosedRange<TimeInterval>] = [2 * minute ... 30 * minute, 30 * minute ... 2 * hour, 2 * hour ... 8 * hour]
+
+    /// The next few comparisons a running session will reach, at most one per window, soonest first:
+    /// e.g. 2× Pomodoros 14 min from now, 1× films in an hour, 1× flights to NYC in 7 hours.
+    /// `count` is the whole number of times it fits once reached; `reachedAfter` is measured from the session start.
+    static func goals(after elapsed: TimeInterval, seed: UInt64) -> [(comparison: FocusComparison, count: Int, reachedAfter: TimeInterval)] {
+        var generator = SeededGenerator(seed: seed)
+        var picked: [(comparison: FocusComparison, count: Int, reachedAfter: TimeInterval)] = []
+        for window in goalWindows {
+            let candidates = catalog.compactMap { comparison -> (comparison: FocusComparison, count: Int, reachedAfter: TimeInterval)? in
+                let count = Int(elapsed / comparison.duration) + 1
+                let reachedAfter = Double(count) * comparison.duration
+                guard window.contains(reachedAfter - elapsed),
+                      !picked.contains(where: { $0.comparison.id == comparison.id }) else { return nil }
+                return (comparison, count, reachedAfter)
+            }
+            if let pick = candidates.randomElement(using: &generator) {
+                picked.append(pick)
+            }
+        }
+        return picked
     }
 
     /// "1", "4.2", "37", "1,204"

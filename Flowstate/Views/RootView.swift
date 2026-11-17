@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import Combine
 
 struct RootView: View {
@@ -46,6 +47,10 @@ struct RootView: View {
                 Task { await FocusNotifications.reschedule(context: context) }
             }
         }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            // Coming back or leaving: give the Live Activity fresh goals for the time already focused.
+            if phase != .inactive { session.syncLiveActivity(in: context) }
+        }
         .sheet(item: $router.recap) { week in
             WeeklyRecapView(weekStart: week.start)
         }
@@ -62,9 +67,14 @@ struct RootView: View {
         .environment(\.comparisonSeed, comparisonSeed)
         #if DEBUG
         .task {
-            if ProcessInfo.processInfo.arguments.contains("-loadSampleData") {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-loadSampleData") {
                 SampleData.replaceAll(in: context)
                 earned.debugAddBalance(34)
+            }
+            // `-startSession` begins a session right away, e.g. to check the Live Activity.
+            if arguments.contains("-startSession") && !session.isActive {
+                session.start(subject: try? context.fetch(FetchDescriptor<Subject>()).first)
             }
         }
         #endif

@@ -7,10 +7,14 @@ options:
 
 # Preview is a debug build without the Screen Time capability, so it can be
 # signed with a free Apple account. App blocking is turned off in it.
+# TestFlight is the same without blocking, but optimized and signed for App Store
+# Connect (profiles from scripts/setup-signing.py). It stays until Apple approves the
+# Family Controls distribution entitlement; then the Release build can go to TestFlight.
 configs:
   Debug: debug
   Release: release
   Preview: debug
+  TestFlight: release
 
 settings:
   base:
@@ -18,15 +22,16 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     # Set this to your Apple Developer Team ID to run on a real iPhone.
-    DEVELOPMENT_TEAM: A4VFZ639DV
+    DEVELOPMENT_TEAM: YQ9H9S829Y
 
 targets:
   Flowstate:
     type: application
     platform: iOS
-    sources: [Flowstate, Shared]
+    sources: [Flowstate, Shared, SharedUI]
     dependencies:
       - target: FlowstateMonitor
+      - target: FlowstateWidgets
     info:
       path: Flowstate/Resources/Info.plist
       properties:
@@ -39,6 +44,10 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # Only Apple's built-in encryption (HTTPS etc.), so App Store Connect skips the export compliance question.
+        ITSAppUsesNonExemptEncryption: false
+        # The running session as a Live Activity on the Lock Screen and in the Dynamic Island.
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate
@@ -51,6 +60,12 @@ targets:
         Preview:
           CODE_SIGN_ENTITLEMENTS: ""
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+        TestFlight:
+          CODE_SIGN_ENTITLEMENTS: ""
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: flowstate App Store
 
   # Runs in the background to re-block distracting apps when earned time runs out.
   FlowstateMonitor:
@@ -76,6 +91,36 @@ targets:
         Preview:
           CODE_SIGN_ENTITLEMENTS: ""
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+        TestFlight:
+          CODE_SIGN_ENTITLEMENTS: ""
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: flowstate monitor App Store
+
+  # Draws the running session's Live Activity (Lock Screen and Dynamic Island).
+  FlowstateWidgets:
+    type: app-extension
+    platform: iOS
+    sources: [FlowstateWidgets, SharedUI]
+    info:
+      path: FlowstateWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: flowstate
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate.widgets
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+      configs:
+        TestFlight:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: flowstate widgets App Store
 
   FlowstateTests:
     type: bundle.unit-test
@@ -133,3 +178,17 @@ schemes:
       config: Preview
     archive:
       config: Preview
+
+  # Archived by scripts/testflight.sh: everything except app blocking, signed for App Store Connect.
+  Flowstate TestFlight:
+    build:
+      targets:
+        Flowstate: all
+    run:
+      config: TestFlight
+    profile:
+      config: TestFlight
+    analyze:
+      config: TestFlight
+    archive:
+      config: TestFlight

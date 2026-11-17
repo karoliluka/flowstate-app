@@ -28,6 +28,8 @@ Pick a subject (Math, Reading, a side project…) and tap **Start focus**. Until
 
 Ending a session takes a deliberate 1.5-second hold, so quitting on impulse is harder.
 
+While a session runs, it stays on your Lock Screen and in the Dynamic Island: the subject, a live timer, and three "that's like" goals filling up as you go (5× sunlight trips, 1× Beethoven's 9th, 1× Tour de France stage…).
+
 ### Earning scrolling time
 Every focus session earns minutes for your distracting apps (the ones you pick in **Earned time**, like Instagram or TikTok). Outside of an unlock, they stay blocked.
 

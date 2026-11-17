@@ -163,7 +163,7 @@ struct EarnedTimeView: View {
                             .background(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.15)))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.94, height: 0.94)))
                         .disabled(!affordable)
                         .opacity(affordable ? 1 : 0.35)
                     }

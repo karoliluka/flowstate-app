@@ -57,10 +57,12 @@ final class SessionManager {
 
     func start(subject: Subject?) {
         guard !isActive else { return }
-        startedAt = .now
+        let now = Date.now
+        startedAt = now
         subjectID = subject?.uuid
         persist()
         blocking.startBlocking()
+        FocusLiveActivity.start(startedAt: now, subject: subject)
     }
 
     /// Ends the running session. Sessions shorter than `minimumDuration` aren't saved.
@@ -70,6 +72,7 @@ final class SessionManager {
         let subject = subjectID.flatMap { fetchSubject(id: $0, in: context) }
 
         blocking.stopBlocking()
+        FocusLiveActivity.endAll()
         self.startedAt = nil
         self.subjectID = nil
         persist()
@@ -105,6 +108,15 @@ final class SessionManager {
             if let milestone { await FocusNotifications.celebrateMilestone(hours: milestone) }
             if personalBest { await FocusNotifications.celebratePersonalBest(duration: duration) }
             await FocusNotifications.reschedule(context: context)
+        }
+    }
+
+    /// Keeps the Lock Screen / Dynamic Island counter in step with the session (or removes a stale one).
+    func syncLiveActivity(in context: ModelContext) {
+        if let startedAt {
+            FocusLiveActivity.refresh(startedAt: startedAt, subject: subject(in: context))
+        } else {
+            FocusLiveActivity.endAll()
         }
     }
 

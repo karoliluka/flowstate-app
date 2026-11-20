@@ -15,6 +15,7 @@ struct FocusView: View {
     @State private var showingProfile = false
     @State private var showingNewSubject = false
     @State private var editingSubject: Subject?
+    @State private var statsSubject: Subject?
     /// What "focused today" shows. Held back while the session screen covers it, so the new
     /// total rolls up where you can see it once you're back.
     @State private var displayedToday: TimeInterval?
@@ -94,9 +95,17 @@ struct FocusView: View {
                 SubjectChips(
                     subjects: subjectsByUse,
                     selected: selectedSubject,
-                    onSelect: { selectedSubjectID = $0.uuid.uuidString },
+                    onSelect: { subject in
+                        // First tap picks the subject; tapping the picked one again opens its stats.
+                        if subject.uuid == selectedSubject?.uuid {
+                            statsSubject = subject
+                        } else {
+                            selectedSubjectID = subject.uuid.uuidString
+                        }
+                    },
                     onAdd: { showingNewSubject = true },
-                    onEdit: { editingSubject = $0 }
+                    onEdit: { editingSubject = $0 },
+                    onShowStats: { statsSubject = $0 }
                 )
 
                 Button {
@@ -143,11 +152,12 @@ struct FocusView: View {
             .navigationBarTitleDisplayMode(.inline)
             #if DEBUG
             .onAppear {
-                // Launch with `-debugSheet profile|allowed|recap` to open a sheet directly.
+                // Launch with `-debugSheet profile|allowed|recap|stats` to open a sheet directly.
                 switch UserDefaults.standard.string(forKey: "debugSheet") {
                 case "allowed": showingAllowedApps = true
                 case "recap": router.showRecap(for: .now)
                 case "profile": showingProfile = true
+                case "stats": statsSubject = selectedSubject
                 default: break
                 }
             }
@@ -166,6 +176,16 @@ struct FocusView: View {
             .sheet(item: $editingSubject) { subject in
                 SubjectEditor(subject: subject)
             }
+            .sheet(item: $statsSubject) { subject in
+                NavigationStack {
+                    SubjectDetailView(subject: subject)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { statsSubject = nil }
+                            }
+                        }
+                }
+            }
         }
     }
 }
@@ -176,6 +196,7 @@ private struct SubjectChips: View {
     let onSelect: (Subject) -> Void
     let onAdd: () -> Void
     let onEdit: (Subject) -> Void
+    let onShowStats: (Subject) -> Void
 
     @Namespace private var selection
 
@@ -250,9 +271,11 @@ private struct SubjectChips: View {
         }
         .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.94, height: 0.94), haptic: false))
         .contextMenu {
+            Button("Stats", systemImage: "chart.bar") { onShowStats(subject) }
             Button("Edit", systemImage: "pencil") { onEdit(subject) }
         }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isSelected ? "Opens its stats" : "Picks it for the next session")
     }
 }
 

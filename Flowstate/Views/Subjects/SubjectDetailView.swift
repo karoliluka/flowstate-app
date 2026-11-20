@@ -6,7 +6,9 @@ struct SubjectDetailView: View {
     let subject: Subject
 
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @State private var showingEditor = false
+    @State private var confirmingDelete = false
 
     private var sessions: [FocusSession] {
         subject.sessions.sorted { $0.startedAt > $1.startedAt }
@@ -50,6 +52,19 @@ struct SubjectDetailView: View {
                         description: Text("Pick \(subject.name) on the Focus tab and start a session.")
                     )
                 }
+
+                Button(role: .destructive) {
+                    confirmingDelete = true
+                } label: {
+                    Text("Delete subject")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.red.opacity(0.1)))
+                }
+                .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.97, height: 0.94)))
+                .padding(.top, 8)
             }
             .padding()
         }
@@ -61,6 +76,23 @@ struct SubjectDetailView: View {
         }
         .sheet(isPresented: $showingEditor) {
             SubjectEditor(subject: subject)
+        }
+        .confirmationDialog("Delete \(subject.name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: delete)
+        } message: {
+            Text("Its \(subject.sessions.count) sessions stay in your stats as \"No subject\".")
+        }
+    }
+
+    /// Leaves this screen first, then deletes, so nothing on screen reads the deleted subject.
+    private func delete() {
+        let subject = subject
+        let context = context
+        dismiss()
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            context.delete(subject)
+            try? context.save()
         }
     }
 

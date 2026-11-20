@@ -5,6 +5,12 @@ struct ProfileView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query private var sessions: [FocusSession]
+    @Environment(AccountManager.self) private var account
+    @State private var confirmingSignOut = false
+    @State private var confirmingDeleteAccount = false
+    @State private var deletingAccount = false
+    @State private var accountError: String?
+    @State private var showingSignIn = false
 
     @AppStorage(StorageKeys.username) private var username = ""
     @AppStorage(StorageKeys.appearance) private var appearance: AppearanceMode = .system
@@ -19,15 +25,22 @@ struct ProfileView: View {
         NavigationStack {
             Form {
                 Section {
-                    HStack(spacing: 16) {
-                        Avatar(username: username, size: 56)
+                    // Total focus time as a badge under the initial, the way group mates see it.
+                    VStack(spacing: 10) {
+                        Avatar(username: username, size: 72)
+                        FocusBadge(seconds: allTime)
                         TextField("Your name", text: $username)
-                            .font(.title3)
+                            .font(.title3.weight(.medium))
+                            .multilineTextAlignment(.center)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
+                            .padding(.top, 2)
                     }
-                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                 }
+
+                accountSection
 
                 Section("Appearance") {
                     Picker("Appearance", selection: $appearance) {
@@ -75,6 +88,35 @@ struct ProfileView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(isPresented: $showingSignIn) {
+                NavigationStack {
+                    ScrollView {
+                        SignInView(reason: "An account is only needed for study groups. Your sessions stay on this phone.")
+                            .padding()
+                    }
+                    .navigationTitle("Account")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showingSignIn = false }
+                        }
+                    }
+                }
+                .onChange(of: account.isSignedIn) { _, signedIn in
+                    if signedIn { showingSignIn = false }
+                }
+            }
+            .confirmationDialog("Sign out?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
+                Button("Sign out", role: .destructive) { Task { await account.signOut() } }
+            } message: {
+                Text("Your group mates won't see your focus time update until you sign in again.")
+            }
+            .alert("Delete your account?", isPresented: $confirmingDeleteAccount) {
+                Button("Delete account", role: .destructive) { Task { await deleteAccount() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes your account, your name and focus totals from flowstate's server, and you from all your groups. It can't be undone. Your sessions and stats on this phone stay.")
+            }
             #if DEBUG
             // These wipe real data too, and the Preview build on a phone includes them.
             .confirmationDialog("Replace all your subjects and sessions with sample data?", isPresented: $confirmingSampleData, titleVisibility: .visible) {
@@ -90,6 +132,60 @@ struct ProfileView: View {
                 Text("This can't be undone.")
             }
             #endif
+        }
+    }
+}
+
+extension ProfileView {
+    @ViewBuilder
+    var accountSection: some View {
+        Section {
+            if account.isSignedIn {
+                if let profile = account.profile {
+                    LabeledContent("Name", value: profile.displayName)
+                }
+                if let email = account.email {
+                    LabeledContent("Email", value: email)
+                }
+                Button("Sign out") { confirmingSignOut = true }
+                Button(role: .destructive) {
+                    confirmingDeleteAccount = true
+                } label: {
+                    HStack {
+                        Text("Delete account")
+                        if deletingAccount {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(deletingAccount)
+            } else {
+                Button {
+                    showingSignIn = true
+                } label: {
+                    Label("Sign in for study groups", systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+        } header: {
+            Text("Account")
+        } footer: {
+            if let accountError {
+                Text(accountError).foregroundStyle(.red)
+            } else if account.isSignedIn {
+                Text("Your group mates see your name, your total and weekly focus time, and when you're focusing. Nothing else leaves your phone.")
+            }
+        }
+    }
+
+    func deleteAccount() async {
+        deletingAccount = true
+        defer { deletingAccount = false }
+        do {
+            try await account.deleteAccount()
+            accountError = nil
+        } catch {
+            accountError = "Couldn't delete your account. Check your connection and try again."
         }
     }
 }

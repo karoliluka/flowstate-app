@@ -6,6 +6,7 @@ import UserNotifications
 struct FlowstateApp: App {
     @State private var blocking: BlockingManager
     @State private var session: SessionManager
+    @State private var account = AccountManager()
     @State private var showingIntro = true
     @Environment(\.scenePhase) private var scenePhase
     private let modelContainer: ModelContainer
@@ -37,6 +38,8 @@ struct FlowstateApp: App {
                     .environment(blocking)
                     .environment(session)
                     .environment(NotificationRouter.shared)
+                    .environment(account)
+                    .environment(GroupsRouter.shared)
                 // The app switcher shows a snapshot taken as the app leaves: make it the logo.
                 if scenePhase != .active && !showingIntro {
                     LogoScreen()

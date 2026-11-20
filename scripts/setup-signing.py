@@ -189,8 +189,48 @@ def app_store_profile(name, bundle_resource_id, certificate_id):
     print(f"✓ Created and installed profile “{name}”")
 
 
+# Capabilities the App Store build uses, per app ID (Sign in with Apple for study groups).
+CAPABILITIES = {
+    "com.lukakaroli.flowstate": {
+        "APPLE_ID_AUTH": [{"key": "APPLE_ID_AUTH_APP_CONSENT", "options": [{"key": "PRIMARY_APP_CONSENT"}]}],
+    },
+}
+
+
+def enable_capabilities(identifier, bundle_resource_id):
+    """Turns on missing capabilities. Returns True if anything changed, which makes old profiles stale."""
+    wanted = CAPABILITIES.get(identifier, {})
+    if not wanted:
+        return False
+    current = api("GET", f"/v1/bundleIds/{bundle_resource_id}/bundleIdCapabilities")["data"]
+    have = {c["attributes"]["capabilityType"] for c in current}
+    changed = False
+    for capability, settings in wanted.items():
+        if capability in have:
+            continue
+        api("POST", "/v1/bundleIdCapabilities", {"data": {
+            "type": "bundleIdCapabilities",
+            "attributes": {"capabilityType": capability, "settings": settings},
+            "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle_resource_id}}},
+        }})
+        print(f"✓ Turned on {capability} for {identifier}")
+        changed = True
+    return changed
+
+
+def delete_profiles_named(name):
+    found = api("GET", f"/v1/profiles?filter[name]={urllib.parse.quote(name)}&limit=200")["data"]
+    for profile in found:
+        if profile["attributes"]["name"] == name:
+            api("DELETE", f"/v1/profiles/{profile['id']}")
+
+
 if __name__ == "__main__":
     certificate_id = distribution_certificate()
     for identifier, (app_name, profile_name) in APP_IDS.items():
-        app_store_profile(profile_name, bundle_id(identifier, app_name), certificate_id)
+        resource_id = bundle_id(identifier, app_name)
+        if enable_capabilities(identifier, resource_id):
+            # A profile made before the capability doesn't include it: make a new one.
+            delete_profiles_named(profile_name)
+        app_store_profile(profile_name, resource_id, certificate_id)
     print("Done. scripts/testflight.sh can sign and upload now.")

@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["YQ9H9S829Y.com.lukakaroli.flowstate"],
+        "components": [{ "/": "/join/*", "comment": "Study group invites open in the app" }]
+      }
+    ]
+  }
+}

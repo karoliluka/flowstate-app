@@ -2,9 +2,9 @@ import Foundation
 
 /// Study group invites: https://<web host>/join/CODE once the web page is live, flowstate://join/CODE until then.
 enum InviteLink {
-    /// The invite web page's host, e.g. "flowstate-groups.vercel.app" (see web/README.md).
-    /// While it's nil, invites are shared as a flowstate:// link plus the code to type in.
-    static let webHost: String? = nil
+    /// The invite web page (web/ on Vercel). With the Associated Domain, its links open the app directly.
+    /// Set to nil to fall back to flowstate:// links plus the code to type in.
+    static let webHost: String? = "flowstate.lukakaroli.si"
 
     static func url(for code: String) -> URL {
         if let webHost, let url = URL(string: "https://\(webHost)/join/\(code)") { return url }

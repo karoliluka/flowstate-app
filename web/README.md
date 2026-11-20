@@ -1,5 +1,7 @@
 # flowstate invite pages
 
+Live at **https://flowstate.lukakaroli.si** (CNAME at freedns.si → Vercel, project root `web`).
+
 The page an invite link opens (`/join/CODE`) and the file that lets those links open the app directly (Universal Links). It's static: no build step.
 
 ## Deploy on Vercel (free)

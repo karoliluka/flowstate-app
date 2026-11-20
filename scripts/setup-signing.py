@@ -193,6 +193,8 @@ def app_store_profile(name, bundle_resource_id, certificate_id):
 CAPABILITIES = {
     "com.lukakaroli.flowstate": {
         "APPLE_ID_AUTH": [{"key": "APPLE_ID_AUTH_APP_CONSENT", "options": [{"key": "PRIMARY_APP_CONSENT"}]}],
+        # Invite links on flowstate.lukakaroli.si open the app directly.
+        "ASSOCIATED_DOMAINS": [],
     },
 }
 

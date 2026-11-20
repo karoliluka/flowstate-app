@@ -4,7 +4,6 @@ import Combine
 
 struct RootView: View {
     @Environment(SessionManager.self) private var session
-    @Environment(EarnedTimeManager.self) private var earned
     @Environment(BlockingManager.self) private var blocking
     @Environment(NotificationRouter.self) private var router
     @Environment(\.modelContext) private var context
@@ -41,7 +40,6 @@ struct RootView: View {
             if phase == .active {
                 // Screen Time access may have been turned off in Settings meanwhile.
                 blocking.refreshAuthorization()
-                earned.refresh()
                 today = Calendar.current.startOfDay(for: .now)
                 comparisonSeed = UInt64.random(in: .min ... .max)
                 Task { await FocusNotifications.reschedule(context: context) }
@@ -57,20 +55,12 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
             today = Calendar.current.startOfDay(for: .now)
         }
-        .task {
-            // Re-block as soon as an unlock runs out while the app is open.
-            while !Task.isCancelled {
-                earned.refresh()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
         .environment(\.comparisonSeed, comparisonSeed)
         #if DEBUG
         .task {
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("-loadSampleData") {
                 SampleData.replaceAll(in: context)
-                earned.debugAddBalance(34)
             }
             // `-startSession` begins a session right away, e.g. to check the Live Activity.
             if arguments.contains("-startSession") && !session.isActive {

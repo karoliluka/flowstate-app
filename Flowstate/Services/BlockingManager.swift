@@ -8,8 +8,7 @@ import FamilyControls
 @MainActor
 @Observable
 final class BlockingManager {
-    /// Apps (and websites) that stay usable during a focus session. Stored in the
-    /// App Group, next to the distracting apps the extension reads.
+    /// Apps (and websites) that stay usable during a focus session. Stored in the App Group.
     var allowed: FamilyActivitySelection {
         didSet { SharedSettings.saveAllowed(allowed) }
     }
@@ -19,6 +18,7 @@ final class BlockingManager {
 
     init() {
         Self.migrateAllowedToAppGroup()
+        RetiredEarnedShield.clear()
         allowed = SharedSettings.loadAllowed()
         refreshAuthorization()
     }

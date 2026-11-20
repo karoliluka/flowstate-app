@@ -4,7 +4,6 @@ import SwiftData
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Environment(EarnedTimeManager.self) private var earned
     @Query private var sessions: [FocusSession]
 
     @AppStorage(StorageKeys.username) private var username = ""
@@ -57,9 +56,6 @@ struct ProfileView: View {
                     Section {
                         Button("Load sample data") {
                             confirmingSampleData = true
-                        }
-                        Button("Add 30 min earned time") {
-                            earned.debugAddBalance(30)
                         }
                         Button("Delete all data", role: .destructive) {
                             confirmingDeleteAll = true

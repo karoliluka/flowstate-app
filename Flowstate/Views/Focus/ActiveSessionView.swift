@@ -158,33 +158,14 @@ private struct BreathingGlow: View {
 }
 
 private struct StopwatchDisplay: View {
-    @Environment(EarnedTimeManager.self) private var earned
     let elapsed: TimeInterval
 
     var body: some View {
-        let isDeep = elapsed >= EarnedTimeManager.deepFocusThreshold
-        VStack(spacing: 8) {
-            Text(elapsed.clockFormatted)
-                .font(.system(size: 76, weight: .thin, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText(countsDown: false))
-                .animation(Motion.snappy, value: Int(elapsed))
-            Text("+\((earned.earned(for: elapsed) * 60).focusFormatted) of scrolling earned")
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.7))
-                .contentTransition(.numericText())
-                .animation(Motion.snappy, value: Int(earned.earned(for: elapsed) * 60))
-            if isDeep {
-                Label("Deep focus · 1.5× bonus", systemImage: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
-                    .symbolEffect(.bounce, value: isDeep)
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
-            }
-        }
-        .animation(Motion.bouncy, value: isDeep)
-        .sensoryFeedback(.success, trigger: isDeep) { _, deep in deep }
+        Text(elapsed.clockFormatted)
+            .font(.system(size: 76, weight: .thin, design: .rounded))
+            .monospacedDigit()
+            .contentTransition(.numericText(countsDown: false))
+            .animation(Motion.snappy, value: Int(elapsed))
     }
 }
 
@@ -267,18 +248,7 @@ private struct SessionSummaryView: View {
 
             VStack(spacing: 0) {
                 if summary.saved {
-                    if summary.earnedMinutes * 60 < 1 && summary.balanceFull {
-                        row("Scrolling earned", value: "Full", note: "Spend some earned time to keep earning", index: 0)
-                    } else {
-                        row("Scrolling earned", value: "+\((summary.earnedMinutes * 60).focusFormatted)",
-                            note: summary.balanceFull ? "Your balance is now full" : nil, index: 0)
-                    }
-                    if summary.deepFocus {
-                        Divider().overlay(.white.opacity(0.1))
-                        row("Deep focus bonus", value: "1.5×", index: 1)
-                    }
-                    Divider().overlay(.white.opacity(0.1))
-                    row("Focused today", value: summary.focusedToday.focusFormatted, index: 2)
+                    row("Focused today", value: summary.focusedToday.focusFormatted, index: 0)
                 } else {
                     Text("Sessions shorter than \(Int(SessionManager.minimumDuration)) seconds aren't saved.")
                         .font(.subheadline)

@@ -3,8 +3,6 @@ import FamilyControls
 import ManagedSettings
 import DeviceActivity
 
-// Shared between the app and the FlowstateMonitor extension.
-
 /// Whether Screen Time blocking can be used in this build. The Preview build runs on
 /// free Apple accounts, which don't get the Screen Time capability, so blocking is off there.
 enum ScreenTime {
@@ -18,22 +16,13 @@ enum ScreenTime {
     static let maxTokens = 50
 }
 
-/// Settings the extension needs too, stored in the App Group.
+/// Screen Time selections, stored in the App Group (kept there for extensions).
 enum SharedSettings {
     static let appGroup = "group.com.lukakaroli.flowstate"
-    static let distractingKey = "distractingSelection"
     static let allowedKey = "allowedSelection"
 
     static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroup) ?? .standard
-    }
-
-    static func loadDistracting() -> FamilyActivitySelection {
-        loadSelection(forKey: distractingKey)
-    }
-
-    static func saveDistracting(_ selection: FamilyActivitySelection) {
-        saveSelection(selection, forKey: distractingKey)
     }
 
     /// Picking a category in the allowlist includes its apps, because `.all(except:)` only
@@ -68,55 +57,6 @@ enum SharedSettings {
 extension ManagedSettingsStore.Name {
     /// Focus sessions: everything except allowed apps.
     static let focus = Self("focus")
-    /// Earned time: the user's distracting apps, unless unlocked.
-    static let earned = Self("earned")
-}
-
-extension DeviceActivityName {
-    private static let unlockBase = "flowstate.unlock"
-    private static let shortSuffix = ".short"
-
-    /// Blocks distracting apps again when an unlock or emergency pass ends.
-    static func unlock(short: Bool) -> Self {
-        Self(unlockBase + (short ? shortSuffix : ""))
-    }
-
-    static let allUnlocks: [Self] = [unlock(short: false), unlock(short: true)]
-
-    var isUnlock: Bool { rawValue.hasPrefix(Self.unlockBase) }
-
-    /// Short windows are stretched to the 15-minute minimum and really end at the warning.
-    var endsAtWarning: Bool { rawValue.hasSuffix(Self.shortSuffix) }
-}
-
-extension DeviceActivitySchedule {
-    /// iOS rejects monitoring windows shorter than this.
-    static let minimumInterval: TimeInterval = 15 * 60
-
-    /// A one-off window from `start` to `end`. A window shorter than 15 minutes is stretched
-    /// to 15 minutes, with a warning time that fires exactly at `end` (Apple's suggested
-    /// workaround for `intervalTooShort`). `isShort` says which callback marks the real end.
-    static func window(from start: Date, to end: Date, calendar: Calendar = .current) -> (schedule: DeviceActivitySchedule, isShort: Bool) {
-        let components: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
-        let isShort = end.timeIntervalSince(start) < minimumInterval
-        let intervalEnd = isShort ? start.addingTimeInterval(minimumInterval) : end
-        let warningSeconds = Int(intervalEnd.timeIntervalSince(end).rounded())
-        let schedule = DeviceActivitySchedule(
-            intervalStart: calendar.dateComponents(components, from: start),
-            intervalEnd: calendar.dateComponents(components, from: intervalEnd),
-            repeats: false,
-            warningTime: isShort ? DateComponents(minute: warningSeconds / 60, second: warningSeconds % 60) : nil
-        )
-        return (schedule, isShort)
-    }
-}
-
-extension DeviceActivityCenter {
-    /// Monitors a one-off window from `start` to `end`, named by `name(isShort)`.
-    func startMonitoring(_ name: (Bool) -> DeviceActivityName, from start: Date, to end: Date) throws {
-        let window = DeviceActivitySchedule.window(from: start, to: end)
-        try startMonitoring(name(window.isShort), during: window.schedule)
-    }
 }
 
 /// The focus-session block: everything except the apps the user allowed.
@@ -137,29 +77,15 @@ enum FocusShield {
     }
 }
 
-/// The always-on block of distracting apps that earned time temporarily lifts.
-enum EarnedShield {
-    static func apply() {
+/// Earned scrolling time is switched off for now (see archive/earned-time/RESTORE.md).
+/// Its block lived in its own store, and iOS keeps shields across app updates, so it is cleared
+/// on launch; otherwise distracting apps would stay blocked with no way to unlock them.
+enum RetiredEarnedShield {
+    static func clear() {
         guard ScreenTime.isAvailable else { return }
-        let selection = SharedSettings.loadDistracting()
-        let store = ManagedSettingsStore(named: .earned)
-        let apps = selection.applicationTokens.limited()
-        let categories = selection.categoryTokens.limited()
-        let domains = selection.webDomainTokens.limited()
-        store.shield.applications = apps.isEmpty ? nil : apps
-        store.shield.applicationCategories = categories.isEmpty ? nil : .specific(categories)
-        store.shield.webDomains = domains.isEmpty ? nil : domains
-        store.dateAndTime.requireAutomaticDateAndTime = nil
-    }
-
-    /// Opens distracting apps while earned time is spent; the clock is locked so the unlock can't be stretched.
-    static func liftForUnlock() {
-        guard ScreenTime.isAvailable else { return }
-        let store = ManagedSettingsStore(named: .earned)
-        store.shield.applications = nil
-        store.shield.applicationCategories = nil
-        store.shield.webDomains = nil
-        store.dateAndTime.requireAutomaticDateAndTime = true
+        ManagedSettingsStore(named: ManagedSettingsStore.Name("earned")).clearAllSettings()
+        // Unlock timers were the only activities flowstate monitored.
+        DeviceActivityCenter().stopMonitoring()
     }
 }
 

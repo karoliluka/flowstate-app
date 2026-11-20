@@ -7,15 +7,11 @@ struct SessionSummary {
     let subject: Subject?
     /// False for sessions too short to count.
     let saved: Bool
-    let earnedMinutes: Double
-    let balanceFull: Bool
     let focusedToday: TimeInterval
     /// The all-time hour milestone this session crossed, if any.
     let milestoneHours: Double?
     /// Longer than every earlier session.
     let personalBest: Bool
-
-    var deepFocus: Bool { duration >= EarnedTimeManager.deepFocusThreshold }
 }
 
 /// Owns the currently running focus session.
@@ -35,7 +31,6 @@ final class SessionManager {
     private(set) var summary: SessionSummary?
 
     private let blocking: BlockingManager
-    private let earned: EarnedTimeManager
     private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -43,9 +38,8 @@ final class SessionManager {
         static let subjectID = "activeSession.subjectID"
     }
 
-    init(blocking: BlockingManager, earned: EarnedTimeManager) {
+    init(blocking: BlockingManager) {
         self.blocking = blocking
-        self.earned = earned
         startedAt = defaults.object(forKey: Keys.startedAt) as? Date
         subjectID = defaults.string(forKey: Keys.subjectID).flatMap(UUID.init)
 
@@ -83,13 +77,11 @@ final class SessionManager {
         let totalBefore = earlier.reduce(0) { $0 + $1.duration }
         let longestBefore = earlier.map(\.duration).max() ?? 0
 
-        var earnedMinutes = 0.0
         var milestone: Double?
         var personalBest = false
         if saved {
             context.insert(FocusSession(startedAt: startedAt, endedAt: endedAt, subject: subject))
             try? context.save()
-            earnedMinutes = earned.credit(sessionDuration: duration)
             milestone = FocusComparisons.milestoneHours.last { totalBefore < $0 * 3600 && totalBefore + duration >= $0 * 3600 }
             personalBest = longestBefore > 0 && duration > longestBefore
         }
@@ -97,8 +89,6 @@ final class SessionManager {
             duration: duration,
             subject: subject,
             saved: saved,
-            earnedMinutes: earnedMinutes,
-            balanceFull: earned.isBalanceFull,
             focusedToday: focusedToday(in: context),
             milestoneHours: milestone,
             personalBest: personalBest

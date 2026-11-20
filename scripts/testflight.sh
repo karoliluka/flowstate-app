@@ -45,12 +45,6 @@ xcodebuild archive \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   -quiet
 
-# The monitor extension only re-blocks apps, and without the Family Controls entitlement it can't,
-# so App Store Connect flags it (ITMS-90897). Leave it out until Apple approves the entitlement;
-# the export below signs the app again anyway.
-rm -rf "$ARCHIVE/Products/Applications/Flowstate.app/PlugIns/FlowstateMonitor.appex"
-rmdir "$ARCHIVE/Products/Applications/Flowstate.app/PlugIns" 2>/dev/null || true
-
 cat > "$OUT/ExportOptions.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

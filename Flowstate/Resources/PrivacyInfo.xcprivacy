@@ -17,7 +17,7 @@
 			<array>
 				<!-- The app's own settings -->
 				<string>CA92.1</string>
-				<!-- Settings shared with the FlowstateMonitor extension through the App Group -->
+				<!-- Screen Time selections kept in the App Group -->
 				<string>1C8F.1</string>
 			</array>
 		</dict>

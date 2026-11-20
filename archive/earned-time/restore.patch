@@ -1,0 +1,1621 @@
+diff -ruN a/Flowstate/App/FlowstateApp.swift b/Flowstate/App/FlowstateApp.swift
+--- a/Flowstate/App/FlowstateApp.swift	2026-11-17 11:22:54
++++ b/Flowstate/App/FlowstateApp.swift	2026-11-17 11:22:54
+@@ -6,14 +6,17 @@
+ struct FlowstateApp: App {
+     @State private var blocking: BlockingManager
+     @State private var session: SessionManager
++    @State private var earned: EarnedTimeManager
+     @State private var showingIntro = true
+     @Environment(\.scenePhase) private var scenePhase
+     private let modelContainer: ModelContainer
+ 
+     init() {
+         let blocking = BlockingManager()
++        let earned = EarnedTimeManager()
+         _blocking = State(initialValue: blocking)
+-        _session = State(initialValue: SessionManager(blocking: blocking))
++        _earned = State(initialValue: earned)
++        _session = State(initialValue: SessionManager(blocking: blocking, earned: earned))
+         // Set before launch finishes, so tapping a notification that opened the app is handled.
+         UNUserNotificationCenter.current().delegate = NotificationRouter.shared
+ 
+@@ -36,6 +39,7 @@
+                 RootView()
+                     .environment(blocking)
+                     .environment(session)
++                    .environment(earned)
+                     .environment(NotificationRouter.shared)
+                 // The app switcher shows a snapshot taken as the app leaves: make it the logo.
+                 if scenePhase != .active && !showingIntro {
+diff -ruN a/Flowstate/Resources/PrivacyInfo.xcprivacy b/Flowstate/Resources/PrivacyInfo.xcprivacy
+--- a/Flowstate/Resources/PrivacyInfo.xcprivacy	2026-11-17 11:22:54
++++ b/Flowstate/Resources/PrivacyInfo.xcprivacy	2026-11-17 11:22:54
+@@ -17,7 +17,7 @@
+ 			<array>
+ 				<!-- The app's own settings -->
+ 				<string>CA92.1</string>
+-				<!-- Screen Time selections kept in the App Group -->
++				<!-- Settings shared with the FlowstateMonitor extension through the App Group -->
+ 				<string>1C8F.1</string>
+ 			</array>
+ 		</dict>
+diff -ruN a/Flowstate/Services/BlockingManager.swift b/Flowstate/Services/BlockingManager.swift
+--- a/Flowstate/Services/BlockingManager.swift	2026-11-17 11:22:54
++++ b/Flowstate/Services/BlockingManager.swift	2026-11-17 11:22:54
+@@ -8,7 +8,8 @@
+ @MainActor
+ @Observable
+ final class BlockingManager {
+-    /// Apps (and websites) that stay usable during a focus session. Stored in the App Group.
++    /// Apps (and websites) that stay usable during a focus session. Stored in the
++    /// App Group, next to the distracting apps the extension reads.
+     var allowed: FamilyActivitySelection {
+         didSet { SharedSettings.saveAllowed(allowed) }
+     }
+@@ -18,7 +19,6 @@
+ 
+     init() {
+         Self.migrateAllowedToAppGroup()
+-        RetiredEarnedShield.clear()
+         allowed = SharedSettings.loadAllowed()
+         refreshAuthorization()
+     }
+diff -ruN a/Flowstate/Services/EarnedTimeManager.swift b/Flowstate/Services/EarnedTimeManager.swift
+--- a/Flowstate/Services/EarnedTimeManager.swift	1970-01-01 01:00:00
++++ b/Flowstate/Services/EarnedTimeManager.swift	2026-11-17 11:22:54
+@@ -0,0 +1,372 @@
++import Foundation
++import FamilyControls
++import DeviceActivity
++
++enum EarnMode: String, CaseIterable, Identifiable, Codable {
++    case gentle, balanced, strict
++
++    var id: Self { self }
++
++    var title: String {
++        switch self {
++        case .gentle: "Gentle"
++        case .balanced: "Balanced"
++        case .strict: "Strict"
++        }
++    }
++
++    /// Minutes of focus needed to earn one minute of scrolling.
++    var focusPerMinute: Double {
++        switch self {
++        case .gentle: 2
++        case .balanced: 3
++        case .strict: 4
++        }
++    }
++
++    /// The most scrolling time that can be saved up, in minutes.
++    var cap: Double {
++        switch self {
++        case .gentle: 90
++        case .balanced: 60
++        case .strict: 30
++        }
++    }
++
++    func isEasier(than other: EarnMode) -> Bool {
++        focusPerMinute < other.focusPerMinute
++    }
++}
++
++/// Focus earns scrolling time; distracting apps stay blocked until the user spends it.
++///
++/// Rules:
++/// - Every `focusPerMinute` minutes of focus earn 1 minute (sessions of 45+ min earn 1.5×).
++/// - The balance is capped per mode, so it can't be hoarded.
++/// - Unlocking gets pricier the more you've unlocked today (1× → 1.5× → 2×).
++/// - Three free 5-minute emergency passes a day.
++/// - Loosening the rules (easier mode, fewer distracting apps) takes effect after a
++///   10-minute cooldown, so it can't be an impulse decision. Tightening is instant.
++@MainActor
++@Observable
++final class EarnedTimeManager {
++    static let deepFocusThreshold: TimeInterval = 45 * 60
++    static let deepFocusBonus = 1.5
++    static let passesPerDay = 3
++    static let passMinutes = 5.0
++    /// iOS can't schedule monitoring windows shorter than 15 minutes, so that's the shortest unlock.
++    static let unlockOptions: [Double] = [15, 30, 60]
++    static let priceTiers: [(upTo: Double, rate: Double)] = [(30, 1), (60, 1.5), (.infinity, 2)]
++    static let loosenDelay: TimeInterval = 10 * 60
++
++    struct Unlock: Codable {
++        var endsAt: Date
++        var minutes: Double
++        var cost: Double
++    }
++
++    struct PendingMode: Codable {
++        var mode: EarnMode
++        var at: Date
++    }
++
++    struct PendingApps: Codable {
++        var selection: FamilyActivitySelection
++        var at: Date
++    }
++
++    /// Minutes of scrolling available.
++    private(set) var balance: Double
++    /// Minutes unlocked with earned time today (passes don't count).
++    private(set) var unlockedToday: Double
++    private(set) var passesUsedToday: Int
++    private(set) var activeUnlock: Unlock?
++    private(set) var scheduleError: String?
++    private(set) var pendingMode: PendingMode?
++    private(set) var pendingDistracting: PendingApps?
++
++    private(set) var mode: EarnMode {
++        didSet {
++            balance = min(balance, mode.cap)
++            save()
++        }
++    }
++
++    private(set) var distracting: FamilyActivitySelection {
++        didSet {
++            SharedSettings.saveDistracting(distracting)
++            if !isUnlocked { EarnedShield.apply() }
++        }
++    }
++
++    private var day: Date
++    /// The app's own defaults, so the balance survives switching between Preview and full builds.
++    /// Only the distracting-apps selection lives in the App Group, for the extension.
++    private let defaults = UserDefaults.standard
++
++    private enum Keys {
++        static let balance = "earned.balance"
++        static let unlockedToday = "earned.unlockedToday"
++        static let passesUsedToday = "earned.passesUsedToday"
++        static let activeUnlock = "earned.activeUnlock"
++        static let mode = "earned.mode"
++        static let day = "earned.day"
++        static let pendingMode = "earned.pendingMode"
++        static let pendingDistracting = "earned.pendingDistracting"
++    }
++
++    init() {
++        balance = defaults.double(forKey: Keys.balance)
++        unlockedToday = defaults.double(forKey: Keys.unlockedToday)
++        passesUsedToday = defaults.integer(forKey: Keys.passesUsedToday)
++        activeUnlock = Self.decode(Unlock.self, from: defaults.data(forKey: Keys.activeUnlock))
++        mode = defaults.string(forKey: Keys.mode).flatMap(EarnMode.init) ?? .balanced
++        day = defaults.object(forKey: Keys.day) as? Date ?? Calendar.current.startOfDay(for: .now)
++        pendingMode = Self.decode(PendingMode.self, from: defaults.data(forKey: Keys.pendingMode))
++        pendingDistracting = Self.decode(PendingApps.self, from: defaults.data(forKey: Keys.pendingDistracting))
++        distracting = SharedSettings.loadDistracting()
++
++        resetIfNewDay()
++        applyDuePendingChanges()
++        if !isUnlocked {
++            activeUnlock = nil
++            EarnedShield.apply()
++        }
++    }
++
++    var isEnabled: Bool {
++        MarketingMode.isOn ||
++        !distracting.applicationTokens.isEmpty || !distracting.categoryTokens.isEmpty || !distracting.webDomainTokens.isEmpty
++    }
++
++    var isUnlocked: Bool {
++        activeUnlock.map { $0.endsAt > .now } ?? false
++    }
++
++    var passesLeft: Int {
++        max(0, Self.passesPerDay - passesUsedToday)
++    }
++
++    /// How many apps, categories and websites the pending change will stop blocking.
++    var pendingRemovalCount: Int {
++        guard let pending = pendingDistracting?.selection else { return 0 }
++        return distracting.applicationTokens.subtracting(pending.applicationTokens).count
++            + distracting.categoryTokens.subtracting(pending.categoryTokens).count
++            + distracting.webDomainTokens.subtracting(pending.webDomainTokens).count
++    }
++
++    // MARK: - Earning
++
++    /// Scrolling minutes earned for a session of this length.
++    func earned(for duration: TimeInterval) -> Double {
++        let minutes = duration / 60 / mode.focusPerMinute
++        return duration >= Self.deepFocusThreshold ? minutes * Self.deepFocusBonus : minutes
++    }
++
++    /// Adds a session's earnings. Returns the minutes actually added, which is less once the balance is full.
++    @discardableResult
++    func credit(sessionDuration duration: TimeInterval) -> Double {
++        resetIfNewDay()
++        let before = balance
++        balance = min(mode.cap, balance + earned(for: duration))
++        save()
++        return balance - before
++    }
++
++    var isBalanceFull: Bool {
++        balance >= mode.cap - 0.001
++    }
++
++    // MARK: - Spending
++
++    /// What unlocking `minutes` more costs after `unlockedToday` minutes, given the price tiers.
++    static func cost(forMinutes minutes: Double, unlockedToday: Double) -> Double {
++        var remaining = minutes
++        var used = unlockedToday
++        var cost = 0.0
++        for tier in priceTiers where remaining > 0 {
++            let take = min(max(0, tier.upTo - used), remaining)
++            cost += take * tier.rate
++            used += take
++            remaining -= take
++        }
++        return cost
++    }
++
++    func cost(forMinutes minutes: Double) -> Double {
++        Self.cost(forMinutes: minutes, unlockedToday: unlockedToday)
++    }
++
++    func canAfford(_ minutes: Double) -> Bool {
++        cost(forMinutes: minutes) <= balance + 0.001
++    }
++
++    /// The current per-minute price multiplier.
++    var currentRate: Double {
++        Self.priceTiers.first { unlockedToday < $0.upTo }?.rate ?? 1
++    }
++
++    func unlock(minutes: Double) {
++        resetIfNewDay()
++        guard !isUnlocked, canAfford(minutes) else { return }
++        let cost = cost(forMinutes: minutes)
++        guard begin(Unlock(endsAt: .now.addingTimeInterval(minutes * 60), minutes: minutes, cost: cost)) else { return }
++        balance = max(0, balance - cost)
++        unlockedToday += minutes
++        save()
++    }
++
++    func useEmergencyPass() {
++        resetIfNewDay()
++        guard !isUnlocked, passesLeft > 0 else { return }
++        guard begin(Unlock(endsAt: .now.addingTimeInterval(Self.passMinutes * 60), minutes: Self.passMinutes, cost: 0)) else { return }
++        passesUsedToday += 1
++        save()
++    }
++
++    /// Re-blocks early and refunds the unused share of what was paid.
++    func lockNow() {
++        guard let unlock = activeUnlock else { return }
++        let remainingFraction = min(1, max(0, unlock.endsAt.timeIntervalSinceNow / (unlock.minutes * 60)))
++        balance = min(mode.cap, balance + unlock.cost * remainingFraction)
++        if unlock.cost > 0 {
++            unlockedToday = max(0, unlockedToday - unlock.minutes * remainingFraction)
++        }
++        if ScreenTime.isAvailable {
++            DeviceActivityCenter().stopMonitoring(DeviceActivityName.allUnlocks)
++        }
++        endUnlock()
++    }
++
++    // MARK: - Changing the rules
++
++    /// Stricter modes apply right away; easier ones after `loosenDelay`.
++    /// Picking the current mode cancels a pending change.
++    func requestMode(_ newMode: EarnMode) {
++        if newMode.isEasier(than: mode) {
++            pendingMode = PendingMode(mode: newMode, at: .now.addingTimeInterval(Self.loosenDelay))
++            save()
++        } else {
++            pendingMode = nil
++            mode = newMode
++        }
++    }
++
++    /// Newly added apps are blocked right away; removed ones stay blocked for `loosenDelay`.
++    func requestDistracting(_ selection: FamilyActivitySelection) {
++        let removesSomething = !distracting.applicationTokens.isSubset(of: selection.applicationTokens)
++            || !distracting.categoryTokens.isSubset(of: selection.categoryTokens)
++            || !distracting.webDomainTokens.isSubset(of: selection.webDomainTokens)
++
++        if removesSomething {
++            var blockedNow = distracting
++            blockedNow.applicationTokens.formUnion(selection.applicationTokens)
++            blockedNow.categoryTokens.formUnion(selection.categoryTokens)
++            blockedNow.webDomainTokens.formUnion(selection.webDomainTokens)
++            pendingDistracting = PendingApps(selection: selection, at: .now.addingTimeInterval(Self.loosenDelay))
++            distracting = blockedNow
++        } else {
++            pendingDistracting = nil
++            distracting = selection
++        }
++        save()
++    }
++
++    func cancelPendingMode() {
++        pendingMode = nil
++        save()
++    }
++
++    func cancelPendingDistracting() {
++        pendingDistracting = nil
++        save()
++    }
++
++    /// Call regularly while the app is open; applies due rule changes and re-blocks if the unlock has run out.
++    func refresh() {
++        resetIfNewDay()
++        applyDuePendingChanges()
++        if let unlock = activeUnlock, unlock.endsAt <= .now {
++            endUnlock()
++        }
++    }
++
++    #if DEBUG
++    func debugAddBalance(_ minutes: Double) {
++        balance = min(mode.cap, balance + minutes)
++        save()
++    }
++    #endif
++
++    // MARK: - Private
++
++    /// Hands the re-block to iOS before opening anything, so an unlock can't outlive its time
++    /// even if flowstate is closed. Returns false (and keeps apps blocked) if iOS refuses.
++    private func begin(_ unlock: Unlock) -> Bool {
++        do {
++            try scheduleRelock(at: unlock.endsAt)
++        } catch {
++            scheduleError = "Couldn't unlock: iOS didn't accept the timer that blocks apps again. \(error.localizedDescription)"
++            return false
++        }
++        scheduleError = nil
++        activeUnlock = unlock
++        save()
++        EarnedShield.liftForUnlock()
++        return true
++    }
++
++    private func endUnlock() {
++        activeUnlock = nil
++        save()
++        EarnedShield.apply()
++    }
++
++    /// Wakes FlowstateMonitor when the unlock ends, even if the app is closed.
++    private func scheduleRelock(at end: Date) throws {
++        guard ScreenTime.isAvailable else { return }
++        let center = DeviceActivityCenter()
++        center.stopMonitoring(DeviceActivityName.allUnlocks)
++        try center.startMonitoring({ .unlock(short: $0) }, from: .now, to: end)
++    }
++
++    private func applyDuePendingChanges(now: Date = .now) {
++        if let pending = pendingMode, pending.at <= now {
++            pendingMode = nil
++            mode = pending.mode
++        }
++        if let pending = pendingDistracting, pending.at <= now {
++            pendingDistracting = nil
++            distracting = pending.selection
++            save()
++        }
++    }
++
++    private func resetIfNewDay() {
++        let today = Calendar.current.startOfDay(for: .now)
++        guard day != today else { return }
++        day = today
++        unlockedToday = 0
++        passesUsedToday = 0
++        save()
++    }
++
++    private func save() {
++        defaults.set(balance, forKey: Keys.balance)
++        defaults.set(unlockedToday, forKey: Keys.unlockedToday)
++        defaults.set(passesUsedToday, forKey: Keys.passesUsedToday)
++        defaults.set(Self.encode(activeUnlock), forKey: Keys.activeUnlock)
++        defaults.set(mode.rawValue, forKey: Keys.mode)
++        defaults.set(day, forKey: Keys.day)
++        defaults.set(Self.encode(pendingMode), forKey: Keys.pendingMode)
++        defaults.set(Self.encode(pendingDistracting), forKey: Keys.pendingDistracting)
++    }
++
++    private static func encode<T: Encodable>(_ value: T?) -> Data? {
++        value.flatMap { try? JSONEncoder().encode($0) }
++    }
++
++    private static func decode<T: Decodable>(_ type: T.Type, from data: Data?) -> T? {
++        data.flatMap { try? JSONDecoder().decode(type, from: $0) }
++    }
++}
+diff -ruN a/Flowstate/Services/SessionManager.swift b/Flowstate/Services/SessionManager.swift
+--- a/Flowstate/Services/SessionManager.swift	2026-11-17 11:22:54
++++ b/Flowstate/Services/SessionManager.swift	2026-11-17 11:22:54
+@@ -7,11 +7,15 @@
+     let subject: Subject?
+     /// False for sessions too short to count.
+     let saved: Bool
++    let earnedMinutes: Double
++    let balanceFull: Bool
+     let focusedToday: TimeInterval
+     /// The all-time hour milestone this session crossed, if any.
+     let milestoneHours: Double?
+     /// Longer than every earlier session.
+     let personalBest: Bool
++
++    var deepFocus: Bool { duration >= EarnedTimeManager.deepFocusThreshold }
+ }
+ 
+ /// Owns the currently running focus session.
+@@ -31,6 +35,7 @@
+     private(set) var summary: SessionSummary?
+ 
+     private let blocking: BlockingManager
++    private let earned: EarnedTimeManager
+     private let defaults = UserDefaults.standard
+ 
+     private enum Keys {
+@@ -38,8 +43,9 @@
+         static let subjectID = "activeSession.subjectID"
+     }
+ 
+-    init(blocking: BlockingManager) {
++    init(blocking: BlockingManager, earned: EarnedTimeManager) {
+         self.blocking = blocking
++        self.earned = earned
+         startedAt = defaults.object(forKey: Keys.startedAt) as? Date
+         subjectID = defaults.string(forKey: Keys.subjectID).flatMap(UUID.init)
+ 
+@@ -77,11 +83,13 @@
+         let totalBefore = earlier.reduce(0) { $0 + $1.duration }
+         let longestBefore = earlier.map(\.duration).max() ?? 0
+ 
++        var earnedMinutes = 0.0
+         var milestone: Double?
+         var personalBest = false
+         if saved {
+             context.insert(FocusSession(startedAt: startedAt, endedAt: endedAt, subject: subject))
+             try? context.save()
++            earnedMinutes = earned.credit(sessionDuration: duration)
+             milestone = FocusComparisons.milestoneHours.last { totalBefore < $0 * 3600 && totalBefore + duration >= $0 * 3600 }
+             personalBest = longestBefore > 0 && duration > longestBefore
+         }
+@@ -89,6 +97,8 @@
+             duration: duration,
+             subject: subject,
+             saved: saved,
++            earnedMinutes: earnedMinutes,
++            balanceFull: earned.isBalanceFull,
+             focusedToday: focusedToday(in: context),
+             milestoneHours: milestone,
+             personalBest: personalBest
+diff -ruN a/Flowstate/Views/Earned/EarnedTimeView.swift b/Flowstate/Views/Earned/EarnedTimeView.swift
+--- a/Flowstate/Views/Earned/EarnedTimeView.swift	1970-01-01 01:00:00
++++ b/Flowstate/Views/Earned/EarnedTimeView.swift	2026-11-17 11:22:54
+@@ -0,0 +1,493 @@
++import SwiftUI
++import FamilyControls
++
++/// Spend earned scrolling time, pick distracting apps and the earning mode.
++struct EarnedTimeView: View {
++    @Environment(EarnedTimeManager.self) private var earned
++    @Environment(BlockingManager.self) private var blocking
++    @Environment(\.dismiss) private var dismiss
++    @State private var showingPicker = false
++    /// The picker edits a copy; it's handed to `requestDistracting` when the picker closes.
++    @State private var draft = FamilyActivitySelection()
++    @State private var draftStart = FamilyActivitySelection()
++    /// An easier mode waiting for the user to confirm the cooldown.
++    @State private var confirmingMode: EarnMode?
++
++    var body: some View {
++        NavigationStack {
++            ScrollView {
++                VStack(spacing: 16) {
++                    BalanceRing(balance: earned.balance, cap: earned.mode.cap)
++                        .padding(.vertical, 12)
++
++                    if !ScreenTime.isAvailable {
++                        Card {
++                            Text("App blocking is off in this preview build. Your balance still grows as you focus.")
++                                .font(.subheadline)
++                                .foregroundStyle(.secondary)
++                        }
++                    } else if !blocking.isAuthorized {
++                        Card {
++                            Text("Allow Screen Time access to block distracting apps.")
++                                .font(.subheadline)
++                                .foregroundStyle(.secondary)
++                            Button("Allow") {
++                                Task {
++                                    await blocking.requestAuthorization()
++                                    if blocking.isAuthorized { openPicker() }
++                                }
++                            }
++                            .font(.subheadline.weight(.semibold))
++                        }
++                    }
++
++                    if earned.isEnabled {
++                        spendCard
++                    }
++
++                    distractingCard
++
++                    VStack(alignment: .leading, spacing: 12) {
++                        Text("How you earn")
++                            .font(.title3.weight(.semibold))
++                        Picker("Mode", selection: Binding(get: { earned.pendingMode?.mode ?? earned.mode }, set: chooseMode)) {
++                            ForEach(EarnMode.allCases) { Text($0.title).tag($0) }
++                        }
++                        .pickerStyle(.segmented)
++
++                        if let pending = earned.pendingMode {
++                            PendingNote(
++                                text: "\(pending.mode.title) starts at \(pending.at.formatted(date: .omitted, time: .shortened)). Until then \(earned.mode.title) rules apply.",
++                                cancel: earned.cancelPendingMode
++                            )
++                        } else {
++                            Text("Easier modes start \(Int(EarnedTimeManager.loosenDelay / 60)) minutes after you pick them.")
++                                .font(.caption)
++                                .foregroundStyle(.secondary)
++                        }
++                    }
++                    .frame(maxWidth: .infinity, alignment: .leading)
++                    .padding(.top, 12)
++
++                    ExchangeCard(mode: earned.mode)
++                    DeepFocusCard(mode: earned.mode)
++                    PriceCard(unlockedToday: earned.unlockedToday)
++                    PassesCard(passesLeft: earned.passesLeft)
++                }
++                .padding()
++                .animation(.spring(duration: 0.45), value: earned.mode)
++            }
++            .navigationTitle("Earned time")
++            .navigationBarTitleDisplayMode(.inline)
++            .toolbar {
++                ToolbarItem(placement: .confirmationAction) {
++                    Button("Done") { dismiss() }
++                }
++            }
++            .alert(
++                confirmingMode.map { "Switch to \($0.title)?" } ?? "",
++                isPresented: Binding(get: { confirmingMode != nil }, set: { if !$0 { confirmingMode = nil } }),
++                presenting: confirmingMode
++            ) { mode in
++                Button("Switch in \(Int(EarnedTimeManager.loosenDelay / 60)) min") { earned.requestMode(mode) }
++                Button("Keep \(earned.mode.title)", role: .cancel) {}
++            } message: { mode in
++                Text("\(mode.title) is easier, so it starts in \(Int(EarnedTimeManager.loosenDelay / 60)) minutes. That way it's a decision, not an impulse. Until then \(earned.mode.title) rules apply, and you can still cancel.")
++            }
++            .familyActivityPicker(isPresented: $showingPicker, selection: $draft)
++            .onChange(of: showingPicker) { _, showing in
++                // Cancelling the picker leaves the draft untouched; don't restart a pending cooldown then.
++                if !showing && !Self.sameTokens(draft, draftStart) {
++                    earned.requestDistracting(draft)
++                }
++            }
++        }
++    }
++
++    /// Stricter modes apply right away; easier ones ask first, because they wait out the cooldown.
++    private func chooseMode(_ mode: EarnMode) {
++        if mode.isEasier(than: earned.mode) && earned.pendingMode?.mode != mode {
++            confirmingMode = mode
++        } else {
++            earned.requestMode(mode)
++        }
++    }
++
++    private func openPicker() {
++        draft = earned.pendingDistracting?.selection ?? earned.distracting
++        draftStart = draft
++        showingPicker = true
++    }
++
++    private static func sameTokens(_ a: FamilyActivitySelection, _ b: FamilyActivitySelection) -> Bool {
++        a.applicationTokens == b.applicationTokens
++            && a.categoryTokens == b.categoryTokens
++            && a.webDomainTokens == b.webDomainTokens
++    }
++
++    @ViewBuilder
++    private var spendCard: some View {
++        if let unlock = earned.activeUnlock, earned.isUnlocked {
++            Card {
++                TimelineView(.periodic(from: .now, by: 1)) { context in
++                    Text(max(0, unlock.endsAt.timeIntervalSince(context.date)).clockFormatted)
++                        .font(.system(size: 44, weight: .light, design: .rounded))
++                        .monospacedDigit()
++                }
++                Text(unlock.cost > 0 ? "until apps lock again. Locking early gives back the unused time." : "left on your emergency pass")
++                    .font(.subheadline)
++                    .foregroundStyle(.secondary)
++                Button("Lock now") { earned.lockNow() }
++                    .buttonStyle(PrimaryButtonStyle())
++            }
++        } else {
++            Card {
++                Text("Unlock distracting apps")
++                    .font(.subheadline.weight(.medium))
++                HStack(spacing: 8) {
++                    ForEach(EarnedTimeManager.unlockOptions, id: \.self) { minutes in
++                        let affordable = earned.canAfford(minutes)
++                        Button {
++                            earned.unlock(minutes: minutes)
++                        } label: {
++                            VStack(spacing: 4) {
++                                Text("\(Int(minutes)) min")
++                                    .font(.headline)
++                                Text("costs \((earned.cost(forMinutes: minutes) * 60).focusFormatted)")
++                                    .font(.caption)
++                                    .foregroundStyle(.secondary)
++                            }
++                            .monospacedDigit()
++                            .frame(maxWidth: .infinity)
++                            .padding(.vertical, 14)
++                            .background(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.15)))
++                            .contentShape(Rectangle())
++                        }
++                        .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.94, height: 0.94)))
++                        .disabled(!affordable)
++                        .opacity(affordable ? 1 : 0.35)
++                    }
++                }
++                Button {
++                    earned.useEmergencyPass()
++                } label: {
++                    Label("Use an emergency pass (5 min)", systemImage: "cross.case")
++                        .font(.subheadline)
++                }
++                .disabled(earned.passesLeft == 0)
++
++                if let error = earned.scheduleError {
++                    Text(error)
++                        .font(.caption)
++                        .foregroundStyle(.red)
++                }
++            }
++        }
++    }
++
++    private var distractingCard: some View {
++        Card {
++            Text("Distracting apps")
++                .font(.subheadline.weight(.medium))
++            Text("These stay blocked until you spend earned time on them. Removing one takes \(Int(EarnedTimeManager.loosenDelay / 60)) minutes to apply.")
++                .font(.caption)
++                .foregroundStyle(.secondary)
++            if earned.isEnabled {
++                VStack(alignment: .leading, spacing: 10) {
++                    ForEach(Array(earned.distracting.categoryTokens), id: \.self) { Label($0) }
++                    ForEach(Array(earned.distracting.applicationTokens), id: \.self) { Label($0) }
++                    ForEach(Array(earned.distracting.webDomainTokens), id: \.self) { Label($0) }
++                }
++                .font(.subheadline)
++            }
++            if earned.distracting.applicationTokens.count > ScreenTime.maxTokens {
++                Text("iOS can block at most \(ScreenTime.maxTokens) individual apps, so some of these stay open. Pick a whole category to block more.")
++                    .font(.caption)
++                    .foregroundStyle(.orange)
++            }
++            if let pending = earned.pendingDistracting {
++                PendingNote(
++                    text: "Unblocking \(earned.pendingRemovalCount) at \(pending.at.formatted(date: .omitted, time: .shortened)).",
++                    cancel: earned.cancelPendingDistracting
++                )
++            }
++            Button(earned.isEnabled ? "Change" : "Choose distracting apps") {
++                openPicker()
++            }
++            .font(.subheadline.weight(.semibold))
++            .disabled(!blocking.isAuthorized)
++        }
++    }
++}
++
++/// A rule change waiting out its cooldown, with a way to call it off.
++private struct PendingNote: View {
++    let text: String
++    let cancel: () -> Void
++
++    var body: some View {
++        HStack(alignment: .firstTextBaseline) {
++            Label(text, systemImage: "clock")
++                .font(.caption)
++                .foregroundStyle(.secondary)
++            Spacer()
++            Button("Cancel", action: cancel)
++                .font(.caption.weight(.semibold))
++        }
++    }
++}
++
++// MARK: - Building blocks
++
++private struct Card<Content: View>: View {
++    @ViewBuilder let content: Content
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 12) {
++            content
++        }
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .padding(18)
++        .background(RoundedRectangle(cornerRadius: 20).fill(Color.primary.opacity(0.05)))
++    }
++}
++
++/// Balance as a ring that fills toward the saving cap.
++private struct BalanceRing: View {
++    let balance: Double
++    let cap: Double
++
++    var body: some View {
++        ZStack {
++            Circle()
++                .stroke(Color.primary.opacity(0.08), lineWidth: 10)
++            Circle()
++                .trim(from: 0, to: min(1, balance / cap))
++                .stroke(Color.primary, style: StrokeStyle(lineWidth: 10, lineCap: .round))
++                .rotationEffect(.degrees(-90))
++            VStack(spacing: 2) {
++                Text((balance * 60).focusFormatted)
++                    .font(.system(size: 46, weight: .light, design: .rounded))
++                    .monospacedDigit()
++                    .contentTransition(.numericText())
++                Text("earned")
++                    .foregroundStyle(.secondary)
++                Text("save up to \(Int(cap))m")
++                    .font(.caption)
++                    .foregroundStyle(.tertiary)
++                    .contentTransition(.numericText())
++            }
++        }
++        .frame(width: 200, height: 200)
++    }
++}
++
++private struct CardTitle: View {
++    let title: String
++    let icon: String
++
++    var body: some View {
++        Label(title, systemImage: icon)
++            .font(.subheadline.weight(.medium))
++    }
++}
++
++/// N faint blocks of focus turn into one solid block of scrolling.
++private struct ExchangeCard: View {
++    let mode: EarnMode
++
++    var body: some View {
++        let focusBlocks = Int(mode.focusPerMinute)
++        let perHour = 60 / mode.focusPerMinute
++
++        Card {
++            CardTitle(title: "The exchange rate", icon: "arrow.left.arrow.right")
++
++            HStack(spacing: 12) {
++                HStack(spacing: 5) {
++                    ForEach(0..<focusBlocks, id: \.self) { _ in
++                        block(filled: false)
++                            .transition(.scale.combined(with: .opacity))
++                    }
++                }
++                Image(systemName: "arrow.right")
++                    .foregroundStyle(.secondary)
++                block(filled: true)
++            }
++            .frame(maxWidth: .infinity)
++            .padding(.vertical, 8)
++
++            HStack {
++                Text("\(focusBlocks) min of focus")
++                Spacer()
++                Text("1 min of scrolling")
++            }
++            .font(.caption)
++            .foregroundStyle(.secondary)
++
++            Divider()
++
++            HStack {
++                Text("1 hour of focus")
++                Spacer()
++                Text("\(Int(perHour))m of scrolling")
++                    .monospacedDigit()
++                    .contentTransition(.numericText())
++                    .fontWeight(.medium)
++            }
++            .font(.subheadline)
++        }
++    }
++
++    private func block(filled: Bool) -> some View {
++        RoundedRectangle(cornerRadius: 8)
++            .fill(filled ? Color.primary : Color.primary.opacity(0.15))
++            .frame(width: 34, height: 34)
++    }
++}
++
++/// A one-hour timeline where the bonus kicks in at 45 minutes.
++private struct DeepFocusCard: View {
++    let mode: EarnMode
++
++    var body: some View {
++        let split = EarnedTimeManager.deepFocusThreshold / 3600
++        let normalHour = 60 / mode.focusPerMinute
++        let bonusHour = normalHour * EarnedTimeManager.deepFocusBonus
++
++        Card {
++            CardTitle(title: "Deep focus bonus", icon: "flame")
++
++            GeometryReader { geometry in
++                HStack(spacing: 3) {
++                    RoundedRectangle(cornerRadius: 5)
++                        .fill(Color.primary.opacity(0.15))
++                        .frame(width: (geometry.size.width - 3) * split)
++                    RoundedRectangle(cornerRadius: 5)
++                        .fill(Color.primary)
++                }
++            }
++            .frame(height: 14)
++
++            GeometryReader { geometry in
++                ZStack(alignment: .leading) {
++                    Text("0")
++                    Text("45 min")
++                        .fixedSize()
++                        .offset(x: geometry.size.width * split - 20)
++                    Text("1 h")
++                        .frame(maxWidth: .infinity, alignment: .trailing)
++                }
++            }
++            .frame(height: 14)
++            .font(.caption)
++            .foregroundStyle(.secondary)
++
++            Text("Focus for **45 minutes or more** in one go, and that whole session earns **50% more** scrolling time.")
++                .font(.subheadline)
++
++            Divider()
++
++            HStack {
++                Text("A 1 hour session earns")
++                Spacer()
++                Text("\(Int(normalHour))m")
++                    .strikethrough()
++                    .foregroundStyle(.secondary)
++                Text("\(Int(bonusHour))m")
++                    .fontWeight(.medium)
++                    .contentTransition(.numericText())
++            }
++            .font(.subheadline)
++            .monospacedDigit()
++        }
++    }
++}
++
++/// Step bars for the daily price tiers, with today's tier highlighted.
++private struct PriceCard: View {
++    let unlockedToday: Double
++
++    private let labels = ["First 30 min", "Next 30 min", "After 1 h"]
++
++    var body: some View {
++        let tiers = EarnedTimeManager.priceTiers
++        let current = tiers.firstIndex { unlockedToday < $0.upTo } ?? tiers.count - 1
++
++        Card {
++            CardTitle(title: "Scrolling costs more the more you scroll", icon: "chart.bar.fill")
++
++            HStack(alignment: .bottom, spacing: 8) {
++                ForEach(tiers.indices, id: \.self) { index in
++                    let isCurrent = index == current
++                    VStack(spacing: 6) {
++                        Text("\(tiers[index].rate.formatted())×")
++                            .font(.system(.headline, design: .rounded))
++                        RoundedRectangle(cornerRadius: 8)
++                            .fill(isCurrent ? Color.primary : Color.primary.opacity(0.15))
++                            .frame(height: 30 * tiers[index].rate)
++                        Text(labels[index])
++                            .font(.caption)
++                            .foregroundStyle(isCurrent ? .primary : .secondary)
++                        Text(isCurrent ? "now" : " ")
++                            .font(.caption2.weight(.semibold))
++                            .foregroundStyle(.secondary)
++                    }
++                    .frame(maxWidth: .infinity)
++                }
++            }
++            .padding(.top, 4)
++
++            Text("Each minute of scrolling you unlock is paid with earned time. Your first 30 minutes of the day cost 1 minute each, the next 30 cost 1.5, and after an hour every minute costs 2. So unlocking 15 minutes costs 15m at first, but 30m once you've already scrolled an hour today. The count starts over at midnight.")
++                .font(.caption)
++                .foregroundStyle(.secondary)
++        }
++    }
++}
++
++private struct PassesCard: View {
++    let passesLeft: Int
++
++    var body: some View {
++        Card {
++            HStack {
++                VStack(alignment: .leading, spacing: 4) {
++                    CardTitle(title: "Emergency passes", icon: "cross.case")
++                    Text("5 min each, free. \(passesLeft) left today.")
++                        .font(.caption)
++                        .foregroundStyle(.secondary)
++                }
++                Spacer()
++                HStack(spacing: 6) {
++                    ForEach(0..<EarnedTimeManager.passesPerDay, id: \.self) { index in
++                        Circle()
++                            .fill(index < passesLeft ? Color.primary : Color.primary.opacity(0.12))
++                            .frame(width: 12, height: 12)
++                    }
++                }
++            }
++        }
++    }
++}
++
++/// Small pill on the home screen: earned balance, or time left while unlocked.
++struct EarnedBadge: View {
++    @Environment(EarnedTimeManager.self) private var earned
++
++    var body: some View {
++        Group {
++            if let unlock = earned.activeUnlock, earned.isUnlocked {
++                TimelineView(.periodic(from: .now, by: 1)) { context in
++                    Label("\(max(0, unlock.endsAt.timeIntervalSince(context.date)).clockFormatted) unlocked", systemImage: "lock.open")
++                }
++            } else {
++                Label("\((earned.balance * 60).focusFormatted) earned", systemImage: "lock")
++            }
++        }
++        .font(.subheadline)
++        .monospacedDigit()
++        .padding(.horizontal, 14)
++        .frame(height: 32)
++        .background(Capsule().fill(Color.primary.opacity(0.06)))
++    }
++}
+diff -ruN a/Flowstate/Views/Focus/ActiveSessionView.swift b/Flowstate/Views/Focus/ActiveSessionView.swift
+--- a/Flowstate/Views/Focus/ActiveSessionView.swift	2026-11-17 11:22:54
++++ b/Flowstate/Views/Focus/ActiveSessionView.swift	2026-11-17 11:22:54
+@@ -158,14 +158,33 @@
+ }
+ 
+ private struct StopwatchDisplay: View {
++    @Environment(EarnedTimeManager.self) private var earned
+     let elapsed: TimeInterval
+ 
+     var body: some View {
+-        Text(elapsed.clockFormatted)
+-            .font(.system(size: 76, weight: .thin, design: .rounded))
+-            .monospacedDigit()
+-            .contentTransition(.numericText(countsDown: false))
+-            .animation(Motion.snappy, value: Int(elapsed))
++        let isDeep = elapsed >= EarnedTimeManager.deepFocusThreshold
++        VStack(spacing: 8) {
++            Text(elapsed.clockFormatted)
++                .font(.system(size: 76, weight: .thin, design: .rounded))
++                .monospacedDigit()
++                .contentTransition(.numericText(countsDown: false))
++                .animation(Motion.snappy, value: Int(elapsed))
++            Text("+\((earned.earned(for: elapsed) * 60).focusFormatted) of scrolling earned")
++                .font(.subheadline)
++                .monospacedDigit()
++                .foregroundStyle(.white.opacity(0.7))
++                .contentTransition(.numericText())
++                .animation(Motion.snappy, value: Int(earned.earned(for: elapsed) * 60))
++            if isDeep {
++                Label("Deep focus · 1.5× bonus", systemImage: "sparkles")
++                    .font(.caption)
++                    .foregroundStyle(.white.opacity(0.6))
++                    .symbolEffect(.bounce, value: isDeep)
++                    .transition(.scale(scale: 0.6).combined(with: .opacity))
++            }
++        }
++        .animation(Motion.bouncy, value: isDeep)
++        .sensoryFeedback(.success, trigger: isDeep) { _, deep in deep }
+     }
+ }
+ 
+@@ -248,7 +267,18 @@
+ 
+             VStack(spacing: 0) {
+                 if summary.saved {
+-                    row("Focused today", value: summary.focusedToday.focusFormatted, index: 0)
++                    if summary.earnedMinutes * 60 < 1 && summary.balanceFull {
++                        row("Scrolling earned", value: "Full", note: "Spend some earned time to keep earning", index: 0)
++                    } else {
++                        row("Scrolling earned", value: "+\((summary.earnedMinutes * 60).focusFormatted)",
++                            note: summary.balanceFull ? "Your balance is now full" : nil, index: 0)
++                    }
++                    if summary.deepFocus {
++                        Divider().overlay(.white.opacity(0.1))
++                        row("Deep focus bonus", value: "1.5×", index: 1)
++                    }
++                    Divider().overlay(.white.opacity(0.1))
++                    row("Focused today", value: summary.focusedToday.focusFormatted, index: 2)
+                 } else {
+                     Text("Sessions shorter than \(Int(SessionManager.minimumDuration)) seconds aren't saved.")
+                         .font(.subheadline)
+diff -ruN a/Flowstate/Views/Focus/FocusView.swift b/Flowstate/Views/Focus/FocusView.swift
+--- a/Flowstate/Views/Focus/FocusView.swift	2026-11-17 11:22:54
++++ b/Flowstate/Views/Focus/FocusView.swift	2026-11-17 11:22:54
+@@ -14,6 +14,7 @@
+     @State private var showingAllowedApps = false
+     @State private var showingProfile = false
+     @State private var showingNewSubject = false
++    @State private var showingEarned = false
+     @State private var editingSubject: Subject?
+     /// What "focused today" shows. Held back while the session screen covers it, so the new
+     /// total rolls up where you can see it once you're back.
+@@ -71,6 +72,10 @@
+                         }
+                     Text("focused today")
+                         .foregroundStyle(.secondary)
++
++                    Button { showingEarned = true } label: { EarnedBadge().hitTarget() }
++                        .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.94, height: 0.94)))
++                        .padding(.top, 20)
+                 }
+                 .onChange(of: focusedToday) { _, _ in
+                     if !sessionScreenShowing { displayedToday = nil }
+@@ -143,10 +148,11 @@
+             .navigationBarTitleDisplayMode(.inline)
+             #if DEBUG
+             .onAppear {
+-                // Launch with `-debugSheet profile|allowed|recap` to open a sheet directly.
++                // Launch with `-debugSheet earned|profile|allowed|recap` to open a sheet directly.
+                 switch UserDefaults.standard.string(forKey: "debugSheet") {
+                 case "allowed": showingAllowedApps = true
+                 case "recap": router.showRecap(for: .now)
++                case "earned": showingEarned = true
+                 case "profile": showingProfile = true
+                 default: break
+                 }
+@@ -154,6 +160,9 @@
+             #endif
+             .sheet(isPresented: $showingAllowedApps) {
+                 AllowedAppsView()
++            }
++            .sheet(isPresented: $showingEarned) {
++                EarnedTimeView()
+             }
+             .sheet(isPresented: $showingProfile) {
+                 ProfileView()
+diff -ruN a/Flowstate/Views/Profile/ProfileView.swift b/Flowstate/Views/Profile/ProfileView.swift
+--- a/Flowstate/Views/Profile/ProfileView.swift	2026-11-17 11:22:54
++++ b/Flowstate/Views/Profile/ProfileView.swift	2026-11-17 11:22:54
+@@ -4,6 +4,7 @@
+ struct ProfileView: View {
+     @Environment(\.modelContext) private var context
+     @Environment(\.dismiss) private var dismiss
++    @Environment(EarnedTimeManager.self) private var earned
+     @Query private var sessions: [FocusSession]
+ 
+     @AppStorage(StorageKeys.username) private var username = ""
+@@ -56,6 +57,9 @@
+                     Section {
+                         Button("Load sample data") {
+                             confirmingSampleData = true
++                        }
++                        Button("Add 30 min earned time") {
++                            earned.debugAddBalance(30)
+                         }
+                         Button("Delete all data", role: .destructive) {
+                             confirmingDeleteAll = true
+diff -ruN a/Flowstate/Views/RootView.swift b/Flowstate/Views/RootView.swift
+--- a/Flowstate/Views/RootView.swift	2026-11-17 11:22:54
++++ b/Flowstate/Views/RootView.swift	2026-11-17 11:22:54
+@@ -4,6 +4,7 @@
+ 
+ struct RootView: View {
+     @Environment(SessionManager.self) private var session
++    @Environment(EarnedTimeManager.self) private var earned
+     @Environment(BlockingManager.self) private var blocking
+     @Environment(NotificationRouter.self) private var router
+     @Environment(\.modelContext) private var context
+@@ -40,6 +41,7 @@
+             if phase == .active {
+                 // Screen Time access may have been turned off in Settings meanwhile.
+                 blocking.refreshAuthorization()
++                earned.refresh()
+                 today = Calendar.current.startOfDay(for: .now)
+                 comparisonSeed = UInt64.random(in: .min ... .max)
+                 Task { await FocusNotifications.reschedule(context: context) }
+@@ -55,12 +57,20 @@
+         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+             today = Calendar.current.startOfDay(for: .now)
+         }
++        .task {
++            // Re-block as soon as an unlock runs out while the app is open.
++            while !Task.isCancelled {
++                earned.refresh()
++                try? await Task.sleep(for: .seconds(1))
++            }
++        }
+         .environment(\.comparisonSeed, comparisonSeed)
+         #if DEBUG
+         .task {
+             let arguments = ProcessInfo.processInfo.arguments
+             if arguments.contains("-loadSampleData") {
+                 SampleData.replaceAll(in: context)
++                earned.debugAddBalance(34)
+             }
+             // `-startSession` begins a session right away, e.g. to check the Live Activity.
+             if arguments.contains("-startSession") && !session.isActive {
+diff -ruN a/FlowstateMonitor/FlowstateMonitor.entitlements b/FlowstateMonitor/FlowstateMonitor.entitlements
+--- a/FlowstateMonitor/FlowstateMonitor.entitlements	1970-01-01 01:00:00
++++ b/FlowstateMonitor/FlowstateMonitor.entitlements	2026-11-17 11:22:54
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>com.apple.developer.family-controls</key>
++	<true/>
++	<key>com.apple.security.application-groups</key>
++	<array>
++		<string>group.com.lukakaroli.flowstate</string>
++	</array>
++</dict>
++</plist>
+diff -ruN a/FlowstateMonitor/FlowstateMonitor.swift b/FlowstateMonitor/FlowstateMonitor.swift
+--- a/FlowstateMonitor/FlowstateMonitor.swift	1970-01-01 01:00:00
++++ b/FlowstateMonitor/FlowstateMonitor.swift	2026-11-17 11:22:54
+@@ -0,0 +1,18 @@
++import DeviceActivity
++
++/// iOS wakes this extension when earned time runs out, even if flowstate is closed.
++final class FlowstateMonitor: DeviceActivityMonitor {
++    override func intervalWillEndWarning(for activity: DeviceActivityName) {
++        super.intervalWillEndWarning(for: activity)
++        if activity.isUnlock && activity.endsAtWarning {
++            EarnedShield.apply()
++        }
++    }
++
++    override func intervalDidEnd(for activity: DeviceActivityName) {
++        super.intervalDidEnd(for: activity)
++        if activity.isUnlock && !activity.endsAtWarning {
++            EarnedShield.apply()
++        }
++    }
++}
+diff -ruN a/FlowstateMonitor/Info.plist b/FlowstateMonitor/Info.plist
+--- a/FlowstateMonitor/Info.plist	1970-01-01 01:00:00
++++ b/FlowstateMonitor/Info.plist	2026-11-17 11:22:54
+@@ -0,0 +1,31 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>$(DEVELOPMENT_LANGUAGE)</string>
++	<key>CFBundleDisplayName</key>
++	<string>flowstate monitor</string>
++	<key>CFBundleExecutable</key>
++	<string>$(EXECUTABLE_NAME)</string>
++	<key>CFBundleIdentifier</key>
++	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>$(PRODUCT_NAME)</string>
++	<key>CFBundlePackageType</key>
++	<string>XPC!</string>
++	<key>CFBundleShortVersionString</key>
++	<string>$(MARKETING_VERSION)</string>
++	<key>CFBundleVersion</key>
++	<string>$(CURRENT_PROJECT_VERSION)</string>
++	<key>NSExtension</key>
++	<dict>
++		<key>NSExtensionPointIdentifier</key>
++		<string>com.apple.deviceactivity.monitor-extension</string>
++		<key>NSExtensionPrincipalClass</key>
++		<string>$(PRODUCT_MODULE_NAME).FlowstateMonitor</string>
++	</dict>
++</dict>
++</plist>
+diff -ruN a/FlowstateMonitor/PrivacyInfo.xcprivacy b/FlowstateMonitor/PrivacyInfo.xcprivacy
+--- a/FlowstateMonitor/PrivacyInfo.xcprivacy	1970-01-01 01:00:00
++++ b/FlowstateMonitor/PrivacyInfo.xcprivacy	2026-11-17 11:22:54
+@@ -0,0 +1,26 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>NSPrivacyTracking</key>
++	<false/>
++	<key>NSPrivacyTrackingDomains</key>
++	<array/>
++	<key>NSPrivacyCollectedDataTypes</key>
++	<array/>
++	<key>NSPrivacyAccessedAPITypes</key>
++	<array>
++		<dict>
++			<key>NSPrivacyAccessedAPIType</key>
++			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
++			<key>NSPrivacyAccessedAPITypeReasons</key>
++			<array>
++				<!-- The app's own settings -->
++				<string>CA92.1</string>
++				<!-- Settings shared with the FlowstateMonitor extension through the App Group -->
++				<string>1C8F.1</string>
++			</array>
++		</dict>
++	</array>
++</dict>
++</plist>
+diff -ruN a/FlowstateTests/EarnedTimeRulesTests.swift b/FlowstateTests/EarnedTimeRulesTests.swift
+--- a/FlowstateTests/EarnedTimeRulesTests.swift	1970-01-01 01:00:00
++++ b/FlowstateTests/EarnedTimeRulesTests.swift	2026-11-17 11:22:54
+@@ -0,0 +1,34 @@
++import Foundation
++import Testing
++@testable import Flowstate
++
++@MainActor
++struct EarnedTimeRulesTests {
++    @Test func firstHalfHourCostsOneToOne() {
++        #expect(EarnedTimeManager.cost(forMinutes: 15, unlockedToday: 0) == 15)
++        #expect(EarnedTimeManager.cost(forMinutes: 30, unlockedToday: 0) == 30)
++    }
++
++    @Test func priceRisesAcrossTiers() {
++        // 15 min at 1× (to reach 30), then 15 min at 1.5×.
++        #expect(EarnedTimeManager.cost(forMinutes: 30, unlockedToday: 15) == 15 + 22.5)
++        // 60 min from scratch: 30 at 1× + 30 at 1.5×.
++        #expect(EarnedTimeManager.cost(forMinutes: 60, unlockedToday: 0) == 75)
++        // Past an hour everything costs 2×.
++        #expect(EarnedTimeManager.cost(forMinutes: 15, unlockedToday: 90) == 30)
++    }
++
++    @Test func onlyEasierModesWaitForTheCooldown() {
++        #expect(EarnMode.gentle.isEasier(than: .balanced))
++        #expect(EarnMode.balanced.isEasier(than: .strict))
++        #expect(!EarnMode.strict.isEasier(than: .gentle))
++        #expect(!EarnMode.balanced.isEasier(than: .balanced))
++    }
++
++    @Test func easierModesEarnFasterAndSaveMore() {
++        for (easier, harder) in [(EarnMode.gentle, EarnMode.balanced), (.balanced, .strict)] {
++            #expect(easier.focusPerMinute < harder.focusPerMinute)
++            #expect(easier.cap > harder.cap)
++        }
++    }
++}
+diff -ruN a/FlowstateTests/ScheduleTests.swift b/FlowstateTests/ScheduleTests.swift
+--- a/FlowstateTests/ScheduleTests.swift	1970-01-01 01:00:00
++++ b/FlowstateTests/ScheduleTests.swift	2026-11-17 11:22:54
+@@ -0,0 +1,59 @@
++import Foundation
++import DeviceActivity
++import Testing
++@testable import Flowstate
++
++/// The windows handed to iOS decide when apps are blocked again, so their math has to be exact.
++struct ScheduleTests {
++    private let calendar: Calendar = {
++        var calendar = Calendar(identifier: .gregorian)
++        calendar.timeZone = TimeZone(identifier: "UTC")!
++        return calendar
++    }()
++    private let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
++
++    @Test func shortWindowIsStretchedAndWarnsAtTheRealEnd() throws {
++        let end = start.addingTimeInterval(5 * 60)
++        let window = DeviceActivitySchedule.window(from: start, to: end, calendar: calendar)
++
++        #expect(window.isShort)
++        #expect(calendar.date(from: window.schedule.intervalStart) == start)
++        #expect(calendar.date(from: window.schedule.intervalEnd) == start.addingTimeInterval(15 * 60))
++        // Warning fires 10 minutes before the stretched end, which is exactly the real end.
++        let warning = try #require(window.schedule.warningTime)
++        #expect(warning.minute == 10 && warning.second == 0)
++        #expect(window.schedule.repeats == false)
++    }
++
++    @Test func oddLengthsKeepSecondPrecision() throws {
++        let end = start.addingTimeInterval(7 * 60 + 30)
++        let window = DeviceActivitySchedule.window(from: start, to: end, calendar: calendar)
++        let warning = try #require(window.schedule.warningTime)
++        #expect(warning.minute == 7 && warning.second == 30)
++    }
++
++    @Test func longWindowEndsExactlyWithoutWarning() {
++        let end = start.addingTimeInterval(30 * 60)
++        let window = DeviceActivitySchedule.window(from: start, to: end, calendar: calendar)
++
++        #expect(!window.isShort)
++        #expect(calendar.date(from: window.schedule.intervalEnd) == end)
++        #expect(window.schedule.warningTime == nil)
++    }
++
++    @Test func exactlyFifteenMinutesIsNotShort() {
++        let window = DeviceActivitySchedule.window(from: start, to: start.addingTimeInterval(15 * 60), calendar: calendar)
++        #expect(!window.isShort)
++    }
++
++    @Test func activityNamesTellTheExtensionWhichCallbackEndsTheUnlock() {
++        let pass = DeviceActivityName.unlock(short: true)
++        #expect(pass.isUnlock && pass.endsAtWarning)
++
++        let unlock = DeviceActivityName.unlock(short: false)
++        #expect(unlock.isUnlock && !unlock.endsAtWarning)
++
++        #expect(DeviceActivityName.allUnlocks.allSatisfy { $0.isUnlock })
++        #expect(!DeviceActivityName("something.else").isUnlock)
++    }
++}
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-11-17 11:22:54
++++ b/README.md	2026-11-17 11:22:54
+@@ -30,11 +30,38 @@
+ 
+ While a session runs, it stays on your Lock Screen and in the Dynamic Island: the subject, a live timer, and three "that's like" goals filling up as you go (5× sunlight trips, 1× Beethoven's 9th, 1× Tour de France stage…).
+ 
++### Earning scrolling time
++Every focus session earns minutes for your distracting apps (the ones you pick in **Earned time**, like Instagram or TikTok). Outside of an unlock, they stay blocked.
++
++| Mode | Focus needed for 1 min of scrolling | 1 hour of focus earns | Most you can save up |
++|---|---|---|---|
++| Gentle | 2 min | 30 min | 90 min |
++| Balanced (default) | 3 min | 20 min | 60 min |
++| Strict | 4 min | 15 min | 30 min |
++
++**Deep focus bonus.** Focus for 45 minutes or more in one go and that whole session earns 50% more. In Balanced, a 1-hour session earns 30 minutes instead of 20.
++
++**Saving up has a limit.** Your balance stops growing at the mode's maximum, so you can't stockpile a whole day of scrolling. It doesn't reset at night: what you saved is still there tomorrow.
++
++### Spending it
++Unlock your distracting apps for 15, 30 or 60 minutes. The more you've already unlocked today, the more each minute costs (it's about how much you've scrolled, not the time of day):
++
++| Scrolling unlocked today | Cost per minute | 15 minutes costs |
++|---|---|---|
++| first 30 min | 1 min of earned time | 15 min |
++| next 30 min | 1.5 min | 22.5 min |
++| after 1 hour | 2 min | 30 min |
++
++The price resets at midnight. Finished early? **Lock now** gives back the time you didn't use.
++
++Out of time but really need an app? You get **3 emergency passes a day**, 5 minutes each, free. Tap **earned** on the home screen and then **Use an emergency pass (5 min)**. The button shows up once you've chosen your distracting apps.
++
+ ### No quick escapes
+-While a session is running, the phone's date and time can't be changed, so the clock can't be wound to stretch it.
++- Making things stricter works instantly. Making them easier (an easier mode, or removing a distracting app) takes **10 minutes**, and you can cancel in the meantime.
++- While a session or an unlock is running, the phone's date and time can't be changed, so the clock can't be wound to stretch it.
+ 
+ ### Stats
+-Time focused today, this week, month and year, with a streak, a calendar of every day, and comparisons like "that's 2.6 Harry Potter movie marathons". Each subject has its own page with its history and a chart. Milestones go from your first hour up to 10,000 hours.
++Time focused today, this week, month and year, with a streak, a calendar of every day, and comparisons like "that's 2.6 Harry Potter movie marathons". Each subject has its own page with a weekly goal, its history and a chart. Milestones go from your first hour up to 10,000 hours.
+ 
+ ### Notifications
+ All optional, switched on and off in **Profile → Notifications**:
+@@ -51,7 +78,7 @@
+ <p align="center">
+   <img src="marketing/screenshots/dark/02-home.png" alt="Home" width="19%">
+   <img src="marketing/screenshots/dark/03-session.png" alt="Focus session" width="19%">
+-  <img src="marketing/screenshots/dark/05-subjects.png" alt="Subjects" width="19%">
++  <img src="marketing/screenshots/dark/04-earned.png" alt="Earned time" width="19%">
+   <img src="marketing/screenshots/dark/06-subject-detail.png" alt="Subject" width="19%">
+   <img src="marketing/screenshots/dark/09-stats-year.png" alt="Stats" width="19%">
+ </p>
+diff -ruN a/Shared/ScreenTime.swift b/Shared/ScreenTime.swift
+--- a/Shared/ScreenTime.swift	2026-11-17 11:22:54
++++ b/Shared/ScreenTime.swift	2026-11-17 11:22:54
+@@ -3,6 +3,8 @@
+ import ManagedSettings
+ import DeviceActivity
+ 
++// Shared between the app and the FlowstateMonitor extension.
++
+ /// Whether Screen Time blocking can be used in this build. The Preview build runs on
+ /// free Apple accounts, which don't get the Screen Time capability, so blocking is off there.
+ enum ScreenTime {
+@@ -16,15 +18,24 @@
+     static let maxTokens = 50
+ }
+ 
+-/// Screen Time selections, stored in the App Group (kept there for extensions).
++/// Settings the extension needs too, stored in the App Group.
+ enum SharedSettings {
+     static let appGroup = "group.com.lukakaroli.flowstate"
++    static let distractingKey = "distractingSelection"
+     static let allowedKey = "allowedSelection"
+ 
+     static var defaults: UserDefaults {
+         UserDefaults(suiteName: appGroup) ?? .standard
+     }
+ 
++    static func loadDistracting() -> FamilyActivitySelection {
++        loadSelection(forKey: distractingKey)
++    }
++
++    static func saveDistracting(_ selection: FamilyActivitySelection) {
++        saveSelection(selection, forKey: distractingKey)
++    }
++
+     /// Picking a category in the allowlist includes its apps, because `.all(except:)` only
+     /// takes app tokens. Rebuilt on every load in case decoding drops the flag.
+     static func loadAllowed() -> FamilyActivitySelection {
+@@ -57,8 +68,57 @@
+ extension ManagedSettingsStore.Name {
+     /// Focus sessions: everything except allowed apps.
+     static let focus = Self("focus")
++    /// Earned time: the user's distracting apps, unless unlocked.
++    static let earned = Self("earned")
+ }
+ 
++extension DeviceActivityName {
++    private static let unlockBase = "flowstate.unlock"
++    private static let shortSuffix = ".short"
++
++    /// Blocks distracting apps again when an unlock or emergency pass ends.
++    static func unlock(short: Bool) -> Self {
++        Self(unlockBase + (short ? shortSuffix : ""))
++    }
++
++    static let allUnlocks: [Self] = [unlock(short: false), unlock(short: true)]
++
++    var isUnlock: Bool { rawValue.hasPrefix(Self.unlockBase) }
++
++    /// Short windows are stretched to the 15-minute minimum and really end at the warning.
++    var endsAtWarning: Bool { rawValue.hasSuffix(Self.shortSuffix) }
++}
++
++extension DeviceActivitySchedule {
++    /// iOS rejects monitoring windows shorter than this.
++    static let minimumInterval: TimeInterval = 15 * 60
++
++    /// A one-off window from `start` to `end`. A window shorter than 15 minutes is stretched
++    /// to 15 minutes, with a warning time that fires exactly at `end` (Apple's suggested
++    /// workaround for `intervalTooShort`). `isShort` says which callback marks the real end.
++    static func window(from start: Date, to end: Date, calendar: Calendar = .current) -> (schedule: DeviceActivitySchedule, isShort: Bool) {
++        let components: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
++        let isShort = end.timeIntervalSince(start) < minimumInterval
++        let intervalEnd = isShort ? start.addingTimeInterval(minimumInterval) : end
++        let warningSeconds = Int(intervalEnd.timeIntervalSince(end).rounded())
++        let schedule = DeviceActivitySchedule(
++            intervalStart: calendar.dateComponents(components, from: start),
++            intervalEnd: calendar.dateComponents(components, from: intervalEnd),
++            repeats: false,
++            warningTime: isShort ? DateComponents(minute: warningSeconds / 60, second: warningSeconds % 60) : nil
++        )
++        return (schedule, isShort)
++    }
++}
++
++extension DeviceActivityCenter {
++    /// Monitors a one-off window from `start` to `end`, named by `name(isShort)`.
++    func startMonitoring(_ name: (Bool) -> DeviceActivityName, from start: Date, to end: Date) throws {
++        let window = DeviceActivitySchedule.window(from: start, to: end)
++        try startMonitoring(name(window.isShort), during: window.schedule)
++    }
++}
++
+ /// The focus-session block: everything except the apps the user allowed.
+ /// While it's on, the clock is locked so a session can't be stretched.
+ enum FocusShield {
+@@ -77,15 +137,29 @@
+     }
+ }
+ 
+-/// Earned scrolling time is switched off for now (see archive/earned-time/RESTORE.md).
+-/// Its block lived in its own store, and iOS keeps shields across app updates, so it is cleared
+-/// on launch; otherwise distracting apps would stay blocked with no way to unlock them.
+-enum RetiredEarnedShield {
+-    static func clear() {
++/// The always-on block of distracting apps that earned time temporarily lifts.
++enum EarnedShield {
++    static func apply() {
+         guard ScreenTime.isAvailable else { return }
+-        ManagedSettingsStore(named: ManagedSettingsStore.Name("earned")).clearAllSettings()
+-        // Unlock timers were the only activities flowstate monitored.
+-        DeviceActivityCenter().stopMonitoring()
++        let selection = SharedSettings.loadDistracting()
++        let store = ManagedSettingsStore(named: .earned)
++        let apps = selection.applicationTokens.limited()
++        let categories = selection.categoryTokens.limited()
++        let domains = selection.webDomainTokens.limited()
++        store.shield.applications = apps.isEmpty ? nil : apps
++        store.shield.applicationCategories = categories.isEmpty ? nil : .specific(categories)
++        store.shield.webDomains = domains.isEmpty ? nil : domains
++        store.dateAndTime.requireAutomaticDateAndTime = nil
++    }
++
++    /// Opens distracting apps while earned time is spent; the clock is locked so the unlock can't be stretched.
++    static func liftForUnlock() {
++        guard ScreenTime.isAvailable else { return }
++        let store = ManagedSettingsStore(named: .earned)
++        store.shield.applications = nil
++        store.shield.applicationCategories = nil
++        store.shield.webDomains = nil
++        store.dateAndTime.requireAutomaticDateAndTime = true
+     }
+ }
+ 
+diff -ruN a/project.yml b/project.yml
+--- a/project.yml	2026-11-17 11:22:54
++++ b/project.yml	2026-11-17 11:22:54
+@@ -30,6 +30,7 @@
+     platform: iOS
+     sources: [Flowstate, Shared, SharedUI]
+     dependencies:
++      - target: FlowstateMonitor
+       - target: FlowstateWidgets
+     info:
+       path: Flowstate/Resources/Info.plist
+@@ -65,6 +66,37 @@
+           CODE_SIGN_STYLE: Manual
+           CODE_SIGN_IDENTITY: Apple Distribution
+           PROVISIONING_PROFILE_SPECIFIER: flowstate App Store
++
++  # Runs in the background to re-block distracting apps when earned time runs out.
++  FlowstateMonitor:
++    type: app-extension
++    platform: iOS
++    sources: [FlowstateMonitor, Shared]
++    info:
++      path: FlowstateMonitor/Info.plist
++      properties:
++        CFBundleDisplayName: flowstate monitor
++        CFBundleShortVersionString: $(MARKETING_VERSION)
++        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
++        NSExtension:
++          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
++          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FlowstateMonitor
++    settings:
++      base:
++        PRODUCT_BUNDLE_IDENTIFIER: com.lukakaroli.flowstate.monitor
++        TARGETED_DEVICE_FAMILY: "1"
++        CODE_SIGN_STYLE: Automatic
++        CODE_SIGN_ENTITLEMENTS: FlowstateMonitor/FlowstateMonitor.entitlements
++      configs:
++        Preview:
++          CODE_SIGN_ENTITLEMENTS: ""
++          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
++        TestFlight:
++          CODE_SIGN_ENTITLEMENTS: ""
++          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PREVIEW"
++          CODE_SIGN_STYLE: Manual
++          CODE_SIGN_IDENTITY: Apple Distribution
++          PROVISIONING_PROFILE_SPECIFIER: flowstate monitor App Store
+ 
+   # Draws the running session's Live Activity (Lock Screen and Dynamic Island).
+   FlowstateWidgets:
+diff -ruN a/scripts/testflight.sh b/scripts/testflight.sh
+--- a/scripts/testflight.sh	2026-11-17 11:22:54
++++ b/scripts/testflight.sh	2026-11-17 11:22:54
+@@ -45,6 +45,12 @@
+   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+   -quiet
+ 
++# The monitor extension only re-blocks apps, and without the Family Controls entitlement it can't,
++# so App Store Connect flags it (ITMS-90897). Leave it out until Apple approves the entitlement;
++# the export below signs the app again anyway.
++rm -rf "$ARCHIVE/Products/Applications/Flowstate.app/PlugIns/FlowstateMonitor.appex"
++rmdir "$ARCHIVE/Products/Applications/Flowstate.app/PlugIns" 2>/dev/null || true
++
+ cat > "$OUT/ExportOptions.plist" <<EOF
+ <?xml version="1.0" encoding="UTF-8"?>
+ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

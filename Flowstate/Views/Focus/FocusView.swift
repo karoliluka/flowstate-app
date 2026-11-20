@@ -14,7 +14,6 @@ struct FocusView: View {
     @State private var showingAllowedApps = false
     @State private var showingProfile = false
     @State private var showingNewSubject = false
-    @State private var showingEarned = false
     @State private var editingSubject: Subject?
     /// What "focused today" shows. Held back while the session screen covers it, so the new
     /// total rolls up where you can see it once you're back.
@@ -72,10 +71,6 @@ struct FocusView: View {
                         }
                     Text("focused today")
                         .foregroundStyle(.secondary)
-
-                    Button { showingEarned = true } label: { EarnedBadge().hitTarget() }
-                        .buttonStyle(SquishButtonStyle(squash: CGSize(width: 0.94, height: 0.94)))
-                        .padding(.top, 20)
                 }
                 .onChange(of: focusedToday) { _, _ in
                     if !sessionScreenShowing { displayedToday = nil }
@@ -148,11 +143,10 @@ struct FocusView: View {
             .navigationBarTitleDisplayMode(.inline)
             #if DEBUG
             .onAppear {
-                // Launch with `-debugSheet earned|profile|allowed|recap` to open a sheet directly.
+                // Launch with `-debugSheet profile|allowed|recap` to open a sheet directly.
                 switch UserDefaults.standard.string(forKey: "debugSheet") {
                 case "allowed": showingAllowedApps = true
                 case "recap": router.showRecap(for: .now)
-                case "earned": showingEarned = true
                 case "profile": showingProfile = true
                 default: break
                 }
@@ -160,9 +154,6 @@ struct FocusView: View {
             #endif
             .sheet(isPresented: $showingAllowedApps) {
                 AllowedAppsView()
-            }
-            .sheet(isPresented: $showingEarned) {
-                EarnedTimeView()
             }
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
